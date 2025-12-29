@@ -11,13 +11,18 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import Link from "next/link";
-import { LogOut, ChevronDown } from "lucide-react";
+import { LogOut, ChevronDown, Sparkles, X } from "lucide-react";
 
 export default function VisualizePage() {
   const { data: session, status } = useSession();
-  const { analyze, save } = useDiagramStore();
+  const { analyze, save, sql, plan } = useDiagramStore();
   const [saveName, setSaveName] = useState("");
   const [isSaveOpen, setIsSaveOpen] = useState(false);
+  
+  // Explanation state
+  const [explanation, setExplanation] = useState<string | null>(null);
+  const [isExplaining, setIsExplaining] = useState(false);
+  const [showExplanation, setShowExplanation] = useState(false);
 
   useEffect(() => {
     if (status === "unauthenticated") {
@@ -38,6 +43,32 @@ export default function VisualizePage() {
     await save(saveName);
     setIsSaveOpen(false);
     setSaveName("");
+  };
+
+  const handleExplain = async () => {
+    if (!sql || !plan) return;
+    
+    setIsExplaining(true);
+    setShowExplanation(true);
+    setExplanation(null);
+    
+    try {
+      const res = await fetch('/api/explain', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ sql, plan })
+      });
+      
+      if (!res.ok) throw new Error('Failed to explain');
+      
+      const data = await res.json();
+      setExplanation(data.explanation);
+    } catch (err) {
+      console.error('Explain error:', err);
+      setExplanation('Failed to generate explanation. Please try again.');
+    } finally {
+      setIsExplaining(false);
+    }
   };
 
   return (
@@ -113,6 +144,16 @@ export default function VisualizePage() {
               </DialogContent>
             </Dialog>
 
+            {/* Explain Button */}
+            <button 
+                onClick={handleExplain}
+                disabled={!plan || isExplaining}
+                className="px-4 py-1.5 bg-purple-600 hover:bg-purple-500 disabled:bg-zinc-700 disabled:cursor-not-allowed rounded text-sm font-medium transition-colors flex items-center gap-2"
+            >
+                <Sparkles className="w-4 h-4" />
+                {isExplaining ? 'Explaining...' : 'Explain'}
+            </button>
+
             <button 
                 onClick={() => analyze()}
                 className="px-4 py-1.5 bg-blue-600 hover:bg-blue-500 rounded text-sm font-medium transition-colors"
@@ -133,6 +174,41 @@ export default function VisualizePage() {
         {/* Diagram Pane */}
         <div className="w-1/2 h-full bg-zinc-900 relative">
             <DiagramCanvas />
+            
+            {/* Explanation Panel (Slides in from right) */}
+            {showExplanation && (
+              <div className="absolute inset-0 bg-zinc-950/95 backdrop-blur-sm z-50 overflow-auto">
+                <div className="p-6">
+                  <div className="flex items-center justify-between mb-4">
+                    <div className="flex items-center gap-2">
+                      <Sparkles className="w-5 h-5 text-purple-400" />
+                      <h3 className="text-lg font-semibold text-white">AI Explanation</h3>
+                    </div>
+                    <button 
+                      onClick={() => setShowExplanation(false)}
+                      className="p-1 hover:bg-zinc-800 rounded transition-colors"
+                    >
+                      <X className="w-5 h-5 text-zinc-400" />
+                    </button>
+                  </div>
+                  
+                  {isExplaining ? (
+                    <div className="flex items-center justify-center py-12">
+                      <div className="text-zinc-400 animate-pulse flex items-center gap-2">
+                        <Sparkles className="w-5 h-5 animate-spin" />
+                        Generating explanation...
+                      </div>
+                    </div>
+                  ) : explanation ? (
+                    <div className="prose prose-invert prose-sm max-w-none">
+                      <div className="text-zinc-300 whitespace-pre-wrap leading-relaxed">
+                        {explanation}
+                      </div>
+                    </div>
+                  ) : null}
+                </div>
+              </div>
+            )}
         </div>
       </div>
     </div>
