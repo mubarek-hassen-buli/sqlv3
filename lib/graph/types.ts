@@ -1,21 +1,25 @@
-import { LogicalNode } from '../sql/types';
+import { RelationNode, OperatorNode, GraphNodeData } from '../sql/types';
 
 export interface Point {
   x: number;
   y: number;
 }
 
-export interface GraphNode extends LogicalNode {
+// Base layout properties
+export interface LayoutProperties {
   x: number;
   y: number;
   width: number;
   height: number;
 }
 
-export interface GraphEdge {
+// Layout node = GraphNodeData + position/size
+export type LayoutNode = GraphNodeData & LayoutProperties;
+
+export interface LayoutEdge {
   id: string;
-  source: string;
-  target: string;
+  from: string;
+  to: string;
   sections: {
     startPoint: Point;
     endPoint: Point;
@@ -24,8 +28,8 @@ export interface GraphEdge {
 }
 
 export interface LayoutGraph {
-  nodes: GraphNode[];
-  edges: GraphEdge[];
+  nodes: LayoutNode[];
+  edges: LayoutEdge[];
   width: number;
   height: number;
 }

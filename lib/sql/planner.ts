@@ -1,228 +1,384 @@
 
 import { parse } from 'pgsql-ast-parser';
 import { 
-  LogicalNode, OperatorType, JoinType, 
-  TableScanNode, FilterNode, ProjectNode, JoinNode, 
-  AggregateNode, SortNode, LimitNode, Schema, Column 
+  RelationNode, OperatorNode, GraphNodeData, Edge, 
+  LogicalPlanGraph, ColumnDef, MOCK_SCHEMAS, OperatorKind 
 } from './types';
 
-// Mock Schema Catalog for inferencing
-const MOCK_SCHEMAS: Record<string, string[]> = {
-  'users': ['id', 'name', 'email', 'image', 'created_at'],
-  'orders': ['id', 'user_id', 'amount', 'status', 'created_at'],
-  'products': ['id', 'name', 'price', 'category'],
-  'emp': ['empno', 'ename', 'job', 'mgr', 'hiredate', 'sal', 'comm', 'deptno'],
-  'dept': ['deptno', 'dname', 'loc'],
-  'scott.emp': ['empno', 'ename', 'job', 'mgr', 'hiredate', 'sal', 'comm', 'deptno'],
-  'scott.dept': ['deptno', 'dname', 'loc']
-};
+let nodeCounter = 0;
+let resultCounter = 0;
 
-let nodeIdCounter = 0;
-
-function generateId(prefix: string): string {
-  return `${prefix}-${nodeIdCounter++}`;
+function genId(prefix: string): string {
+  return `${prefix}-${nodeCounter++}`;
 }
 
-function getExprString(expr: any): string {
-    if (!expr) return "";
-    switch (expr.type) {
-        case 'ref': 
-            if (expr.table) return `${expr.table.name}.${expr.name}`;
-            return expr.name;
-        case 'string': return `'${expr.value}'`;
-        case 'integer': return String(expr.value);
-        case 'numeric': return String(expr.value);
-        case 'boolean': return expr.value ? 'TRUE' : 'FALSE';
-        case 'null': return 'NULL';
-        case 'star': return '*';
-        case 'call': 
-            const funcName = expr.function?.name || 'func';
-            const args = expr.args?.map(getExprString).join(', ') || '';
-            return `${funcName}(${args})`;
-        case 'binary': return `${getExprString(expr.left)} ${expr.op} ${getExprString(expr.right)}`;
-        case 'unary': return `${expr.op} ${getExprString(expr.operand)}`;
-        default: 
-            if (typeof expr === 'string') return expr;
-            if (typeof expr === 'number') return String(expr);
-            return 'expr';
-    }
+function genResultName(): string {
+  return `RESULT_${++resultCounter}`;
+}
+
+// Get columns for a table (from mock or default)
+function getTableColumns(tableName: string): ColumnDef[] {
+  const key = tableName.toLowerCase();
+  if (MOCK_SCHEMAS[key]) {
+    return MOCK_SCHEMAS[key].map(c => ({ ...c }));
+  }
+  // Default columns for unknown tables
+  return [
+    { name: 'col1', dataType: 'UNKNOWN', table: tableName },
+    { name: 'col2', dataType: 'UNKNOWN', table: tableName }
+  ];
+}
+
+// Helper to stringify expressions
+function exprToString(expr: any): string {
+  if (!expr) return "";
+  switch (expr.type) {
+    case 'ref': return expr.table ? `${expr.table.name}.${expr.name}` : expr.name;
+    case 'string': return `'${expr.value}'`;
+    case 'integer': case 'numeric': return String(expr.value);
+    case 'boolean': return expr.value ? 'TRUE' : 'FALSE';
+    case 'null': return 'NULL';
+    case 'star': return '*';
+    case 'call': return `${expr.function?.name || 'fn'}(${(expr.args || []).map(exprToString).join(', ')})`;
+    case 'binary': return `${exprToString(expr.left)} ${expr.op} ${exprToString(expr.right)}`;
+    default: return typeof expr === 'string' ? expr : 'expr';
+  }
 }
 
 /**
- * Main Planner - with fallback for unsupported dialects
+ * Main entry: SQL → LogicalPlanGraph
  */
-export function createLogicalPlan(sql: string): LogicalNode {
-  nodeIdCounter = 0;
-  const cleanSql = sql.replace(/\r/g, '').trim();
+export function createLogicalPlan(sql: string): LogicalPlanGraph {
+  nodeCounter = 0;
+  resultCounter = 0;
+  
+  const nodes: GraphNodeData[] = [];
+  const edges: Edge[] = [];
   
   try {
+    const cleanSql = sql.replace(/\r/g, '').trim();
     const ast = parse(cleanSql);
-    if (ast && ast.length > 0) {
-      const statement: any = ast[0];
-      if (statement.type === 'select') {
-        return buildSelectPlan(statement);
-      }
+    
+    if (ast && ast.length > 0 && (ast[0] as any).type === 'select') {
+      buildSelectGraph(ast[0] as any, nodes, edges);
+    } else {
+      // Fallback for non-select or parse failure
+      buildFallbackGraph(cleanSql, nodes, edges);
     }
-  } catch (err: any) {
-    console.warn("Parser failed, using fallback:", err.message);
+  } catch (err) {
+    console.warn("Parse failed, using fallback:", err);
+    buildFallbackGraph(sql, nodes, edges);
   }
-
-  // FALLBACK: Regex-based extraction for unsupported syntax
-  return buildFallbackPlan(cleanSql);
+  
+  return { nodes, edges };
 }
 
 /**
- * Fallback plan builder using regex (handles any SQL dialect)
+ * Build graph for SELECT statement
  */
-function buildFallbackPlan(sql: string): LogicalNode {
-  const upperSql = sql.toUpperCase();
-  let root: LogicalNode | null = null;
-
-  // Extract tables
-  const tablePatterns = [
-    /\bFROM\s+([A-Z_][A-Z0-9_.]*)/gi,
-    /\bJOIN\s+([A-Z_][A-Z0-9_.]*)/gi,
-    /\bINTO\s+([A-Z_][A-Z0-9_.]*)/gi,
-    /\bUPDATE\s+([A-Z_][A-Z0-9_.]*)/gi,
-    /\bTABLE\s+([A-Z_][A-Z0-9_.]*)/gi,
-  ];
-
-  const tables: string[] = [];
-  tablePatterns.forEach(pattern => {
-    let match;
-    while ((match = pattern.exec(sql)) !== null) {
-      const t = match[1].replace(/[`"\[\]]/g, '');
-      if (t && !tables.includes(t)) tables.push(t);
-    }
-  });
-
-  // Build scans
-  if (tables.length > 0) {
-    root = createScanNode(tables[0]);
-    for (let i = 1; i < Math.min(tables.length, 6); i++) {
-      const nextScan = createScanNode(tables[i]);
-      root = {
-        id: generateId('join'),
-        type: OperatorType.JOIN,
-        joinType: JoinType.INNER,
-        schema: mergeSchemas(root.schema, nextScan.schema),
-        children: [root, nextScan]
-      } as JoinNode;
-    }
-  } else {
-    root = { id: generateId('source'), type: OperatorType.VALUES, schema: { columns: [] }, children: [] };
-  }
-
-  // Detect clauses
-  if (/\bWHERE\b/i.test(upperSql)) {
-    root = { id: generateId('filter'), type: OperatorType.FILTER, condition: 'WHERE ...', schema: root.schema, children: [root] } as FilterNode;
-  }
-  if (/\bGROUP\s+BY\b/i.test(upperSql)) {
-    root = { id: generateId('agg'), type: OperatorType.AGGREGATE, groupByColumns: [], aggregates: [], schema: { columns: [{ name: 'agg', type: 'UNKNOWN' }] }, children: [root] } as AggregateNode;
-  }
-  if (/\bSELECT\b/i.test(upperSql) && !/\bGROUP\s+BY\b/i.test(upperSql)) {
-    root = { id: generateId('project'), type: OperatorType.PROJECT, expressions: ['*'], schema: root.schema, children: [root] } as ProjectNode;
-  }
-  if (/\bORDER\s+BY\b/i.test(upperSql)) {
-    root = { id: generateId('sort'), type: OperatorType.SORT, orderBy: [], schema: root.schema, children: [root] } as SortNode;
-  }
-  if (/\bLIMIT\b/i.test(upperSql)) {
-    root = { id: generateId('limit'), type: OperatorType.LIMIT, limit: 10, schema: root.schema, children: [root] } as LimitNode;
-  }
-  if (/\bINSERT\b/i.test(upperSql)) {
-    root = { id: generateId('insert'), type: OperatorType.INSERT, schema: { columns: [] }, children: [root] };
-  }
-  if (/\bCREATE\s+TABLE\b/i.test(upperSql)) {
-    root = { id: generateId('create'), type: OperatorType.CREATE_TABLE, schema: { columns: [] }, children: [root] };
-  }
-  if (/\bCREATE\s+VIEW\b/i.test(upperSql)) {
-    root = { id: generateId('view'), type: OperatorType.CREATE_VIEW, schema: { columns: [] }, children: [root] };
-  }
-
-  return root;
-}
-
-function createScanNode(tableName: string): TableScanNode {
-  return {
-    id: generateId(`scan-${tableName}`),
-    type: OperatorType.TABLE_SCAN,
-    tableName,
-    schema: {
-      columns: (MOCK_SCHEMAS[tableName] || MOCK_SCHEMAS[tableName.toLowerCase()] || ['col1']).map(c => ({
-        name: c, type: 'UNKNOWN', source: { table: tableName, column: c }
-      })),
-      relationName: tableName
-    },
-    children: []
-  };
-}
-
-function buildSelectPlan(stmt: any): LogicalNode {
-  let root: LogicalNode | null = null;
+function buildSelectGraph(stmt: any, nodes: GraphNodeData[], edges: Edge[]): string {
   const fromItems = stmt.from || [];
+  let currentRelationId: string | null = null;
 
+  // 1. Process FROM clause - create base relation(s)
   if (fromItems.length > 0) {
-    root = processFromItem(fromItems[0]);
+    currentRelationId = processFromItem(fromItems[0], nodes, edges);
+    
+    // Handle JOINs (additional FROM items = implicit cross join)
     for (let i = 1; i < fromItems.length; i++) {
-      const nextNode = processFromItem(fromItems[i]);
-      root = { id: generateId('join-cross'), type: OperatorType.JOIN, joinType: JoinType.CROSS, schema: mergeSchemas(root.schema, nextNode.schema), children: [root, nextNode] } as JoinNode;
+      const rightRelId = processFromItem(fromItems[i], nodes, edges);
+      currentRelationId = addOperatorAndResult(
+        'Join', 'CROSS JOIN', [currentRelationId!, rightRelId],
+        mergeColumns(getRelationColumns(currentRelationId!, nodes), getRelationColumns(rightRelId, nodes)),
+        nodes, edges
+      );
     }
   } else {
-    root = { id: generateId('values'), type: OperatorType.VALUES, schema: { columns: [] }, children: [] };
+    // No FROM - create empty source
+    const rel: RelationNode = {
+      id: genId('rel'),
+      nodeType: 'Relation',
+      name: 'VALUES',
+      isBase: true,
+      isFinal: false,
+      columns: []
+    };
+    nodes.push(rel);
+    currentRelationId = rel.id;
   }
 
-  if (stmt.where) {
-    root = { id: generateId('filter'), type: OperatorType.FILTER, condition: getExprString(stmt.where), schema: root.schema, children: [root] } as FilterNode;
+  // 2. WHERE → Filter operator
+  if (stmt.where && currentRelationId) {
+    const condition = exprToString(stmt.where);
+    const inputCols = getRelationColumns(currentRelationId, nodes);
+    currentRelationId = addOperatorAndResult(
+      'Filter', condition, [currentRelationId],
+      inputCols, // Filter doesn't change columns
+      nodes, edges
+    );
   }
 
-  if (stmt.groupBy) {
-    const cols = (stmt.columns || []).map((c: any) => ({ name: c.alias?.name || getExprString(c.expr), type: 'UNKNOWN' }));
-    root = { id: generateId('agg'), type: OperatorType.AGGREGATE, groupByColumns: (stmt.groupBy || []).map(getExprString), aggregates: [], schema: { columns: cols }, children: [root] } as AggregateNode;
+  // 3. GROUP BY → Aggregate operator
+  if (stmt.groupBy && currentRelationId) {
+    const groupCols = (stmt.groupBy || []).map(exprToString);
+    const selectCols = (stmt.columns || []).map((c: any) => ({
+      name: c.alias?.name || exprToString(c.expr),
+      dataType: 'UNKNOWN',
+      source: exprToString(c.expr)
+    }));
+    
+    currentRelationId = addOperatorAndResult(
+      'Aggregate', `GROUP BY ${groupCols.join(', ')}`, [currentRelationId],
+      selectCols,
+      nodes, edges
+    );
   }
 
-  if (stmt.having) {
-    root = { id: generateId('filter-having'), type: OperatorType.FILTER, condition: getExprString(stmt.having), schema: root.schema, children: [root], metadata: { isHaving: true } } as FilterNode;
+  // 4. HAVING → Filter after aggregate
+  if (stmt.having && currentRelationId) {
+    const condition = exprToString(stmt.having);
+    const inputCols = getRelationColumns(currentRelationId, nodes);
+    currentRelationId = addOperatorAndResult(
+      'Filter', `HAVING ${condition}`, [currentRelationId],
+      inputCols,
+      nodes, edges
+    );
   }
 
-  if (!stmt.groupBy) {
-    const cols = (stmt.columns || []).map((c: any) => ({ name: c.alias?.name || getExprString(c.expr), type: 'UNKNOWN' }));
-    root = { id: generateId('project'), type: OperatorType.PROJECT, expressions: (stmt.columns || []).map((c: any) => getExprString(c.expr)), schema: { columns: cols }, children: [root] } as ProjectNode;
+  // 5. SELECT (Project) - only if not aggregated
+  if (!stmt.groupBy && stmt.columns && currentRelationId) {
+    const projectedCols: ColumnDef[] = [];
+    const exprs: string[] = [];
+    
+    for (const col of stmt.columns) {
+      const exprStr = exprToString(col.expr);
+      exprs.push(exprStr);
+      projectedCols.push({
+        name: col.alias?.name || exprStr,
+        dataType: 'UNKNOWN',
+        source: exprStr
+      });
+    }
+    
+    // Only add Project if not SELECT *
+    if (!exprs.includes('*')) {
+      currentRelationId = addOperatorAndResult(
+        'Project', exprs.join(', '), [currentRelationId],
+        projectedCols,
+        nodes, edges
+      );
+    }
   }
 
-  if (stmt.orderBy) {
-    root = { id: generateId('sort'), type: OperatorType.SORT, orderBy: (stmt.orderBy || []).map((o: any) => `${getExprString(o.by)} ${o.order || 'ASC'}`), schema: root.schema, children: [root] } as SortNode;
+  // 6. ORDER BY → Sort
+  if (stmt.orderBy && currentRelationId) {
+    const sortExprs = (stmt.orderBy || []).map((o: any) => 
+      `${exprToString(o.by)} ${o.order || 'ASC'}`
+    );
+    const inputCols = getRelationColumns(currentRelationId, nodes);
+    currentRelationId = addOperatorAndResult(
+      'Sort', sortExprs.join(', '), [currentRelationId],
+      inputCols,
+      nodes, edges
+    );
   }
 
-  if (stmt.limit) {
-    root = { id: generateId('limit'), type: OperatorType.LIMIT, limit: 10, schema: root.schema, children: [root] } as LimitNode;
+  // 7. LIMIT
+  if (stmt.limit && currentRelationId) {
+    const limitVal = exprToString(stmt.limit.limit);
+    const inputCols = getRelationColumns(currentRelationId, nodes);
+    currentRelationId = addOperatorAndResult(
+      'Limit', `LIMIT ${limitVal}`, [currentRelationId],
+      inputCols,
+      nodes, edges
+    );
   }
 
-  return root;
+  // Mark final relation
+  const finalRel = nodes.find(n => n.id === currentRelationId) as RelationNode;
+  if (finalRel && finalRel.nodeType === 'Relation') {
+    finalRel.isFinal = true;
+    finalRel.name = 'FINAL';
+  }
+
+  return currentRelationId!;
 }
 
-function processFromItem(item: any): LogicalNode {
+/**
+ * Process FROM item → returns relation node id
+ */
+function processFromItem(item: any, nodes: GraphNodeData[], edges: Edge[]): string {
   if (item.type === 'table') {
-    const tableName = item.name?.schema ? `${item.name.schema}.${item.name.name}` : item.name?.name || 'unknown';
-    let node: LogicalNode = createScanNode(tableName);
-    if (item.alias?.name) (node as TableScanNode).alias = item.alias.name;
-
-    if (item.joins?.length) {
+    const tableName = item.name?.schema 
+      ? `${item.name.schema}.${item.name.name}` 
+      : item.name?.name || 'table';
+    const alias = item.alias?.name;
+    
+    // Create base relation
+    const rel: RelationNode = {
+      id: genId('rel'),
+      nodeType: 'Relation',
+      name: alias || tableName,
+      isBase: true,
+      isFinal: false,
+      columns: getTableColumns(tableName)
+    };
+    nodes.push(rel);
+    
+    // Handle explicit JOINs attached to this table
+    let currentId = rel.id;
+    if (item.joins && Array.isArray(item.joins)) {
       for (const join of item.joins) {
-        const rightNode = processFromItem(join.from);
-        node = { id: generateId('join'), type: OperatorType.JOIN, joinType: JoinType.INNER, onCondition: getExprString(join.on), schema: mergeSchemas(node.schema, rightNode.schema), children: [node, rightNode] } as JoinNode;
+        const rightId = processFromItem(join.from, nodes, edges);
+        const joinType = (join.type || 'INNER').replace(' JOIN', '');
+        const onCond = exprToString(join.on);
+        
+        currentId = addOperatorAndResult(
+          'Join', `${joinType} ON ${onCond}`, [currentId, rightId],
+          mergeColumns(getRelationColumns(currentId, nodes), getRelationColumns(rightId, nodes)),
+          nodes, edges
+        );
       }
     }
-    return node;
+    
+    return currentId;
   }
-
+  
+  // Subquery
   if (item.type === 'statement' || item.type === 'select') {
-    const subPlan = buildSelectPlan(item.statement || item);
-    return { id: generateId('subquery'), type: OperatorType.SUBQUERY_SCAN, schema: subPlan.schema, children: [subPlan] };
+    return buildSelectGraph(item.statement || item, nodes, edges);
   }
-
-  return { id: generateId('unknown'), type: OperatorType.VALUES, schema: { columns: [] }, children: [] };
+  
+  // Fallback
+  const rel: RelationNode = {
+    id: genId('rel'),
+    nodeType: 'Relation',
+    name: 'UNKNOWN',
+    isBase: true,
+    isFinal: false,
+    columns: []
+  };
+  nodes.push(rel);
+  return rel.id;
 }
 
-function mergeSchemas(left: Schema, right: Schema): Schema {
-  return { columns: [...left.columns, ...right.columns], relationName: `${left.relationName || 'L'}_${right.relationName || 'R'}` };
+/**
+ * Add operator + output relation, return new relation id
+ */
+function addOperatorAndResult(
+  opKind: OperatorKind,
+  details: string,
+  inputRelIds: string[],
+  outputColumns: ColumnDef[],
+  nodes: GraphNodeData[],
+  edges: Edge[]
+): string {
+  // Create operator node
+  const op: OperatorNode = {
+    id: genId('op'),
+    nodeType: 'Operator',
+    operator: opKind,
+    details: details
+  };
+  nodes.push(op);
+  
+  // Edge from each input relation to operator
+  for (const inputId of inputRelIds) {
+    edges.push({ id: genId('e'), from: inputId, to: op.id });
+  }
+  
+  // Create output relation
+  const result: RelationNode = {
+    id: genId('rel'),
+    nodeType: 'Relation',
+    name: genResultName(),
+    isBase: false,
+    isFinal: false,
+    columns: outputColumns
+  };
+  nodes.push(result);
+  
+  // Edge from operator to output relation
+  edges.push({ id: genId('e'), from: op.id, to: result.id });
+  
+  return result.id;
+}
+
+function getRelationColumns(relId: string, nodes: GraphNodeData[]): ColumnDef[] {
+  const rel = nodes.find(n => n.id === relId && n.nodeType === 'Relation') as RelationNode | undefined;
+  return rel?.columns || [];
+}
+
+function mergeColumns(left: ColumnDef[], right: ColumnDef[]): ColumnDef[] {
+  return [...left, ...right];
+}
+
+/**
+ * Fallback for unparseable SQL
+ */
+function buildFallbackGraph(sql: string, nodes: GraphNodeData[], edges: Edge[]) {
+  const upperSql = sql.toUpperCase();
+  
+  // Extract tables
+  const tables: string[] = [];
+  const tableMatches = sql.match(/(?:FROM|JOIN|INTO|UPDATE)\s+([A-Za-z_][A-Za-z0-9_.]*)/gi) || [];
+  for (const m of tableMatches) {
+    const t = m.split(/\s+/)[1];
+    if (t && !tables.includes(t)) tables.push(t);
+  }
+  
+  // Create base relations
+  let currentId: string | null = null;
+  for (const t of tables) {
+    const rel: RelationNode = {
+      id: genId('rel'),
+      nodeType: 'Relation',
+      name: t,
+      isBase: true,
+      isFinal: false,
+      columns: getTableColumns(t)
+    };
+    nodes.push(rel);
+    
+    if (!currentId) {
+      currentId = rel.id;
+    } else {
+      // Join with previous
+      currentId = addOperatorAndResult(
+        'Join', 'JOIN', [currentId, rel.id],
+        mergeColumns(getRelationColumns(currentId, nodes), rel.columns),
+        nodes, edges
+      );
+    }
+  }
+  
+  if (!currentId) {
+    const rel: RelationNode = { id: genId('rel'), nodeType: 'Relation', name: 'SOURCE', isBase: true, isFinal: false, columns: [] };
+    nodes.push(rel);
+    currentId = rel.id;
+  }
+  
+  // Add operators based on keywords
+  if (/\bWHERE\b/i.test(upperSql)) {
+    currentId = addOperatorAndResult('Filter', 'WHERE ...', [currentId], getRelationColumns(currentId, nodes), nodes, edges);
+  }
+  if (/\bGROUP\s+BY\b/i.test(upperSql)) {
+    currentId = addOperatorAndResult('Aggregate', 'GROUP BY', [currentId], [{ name: 'agg', dataType: 'UNKNOWN' }], nodes, edges);
+  }
+  if (/\bSELECT\b/i.test(upperSql) && !/\bGROUP\s+BY\b/i.test(upperSql)) {
+    currentId = addOperatorAndResult('Project', 'SELECT', [currentId], getRelationColumns(currentId, nodes), nodes, edges);
+  }
+  if (/\bORDER\s+BY\b/i.test(upperSql)) {
+    currentId = addOperatorAndResult('Sort', 'ORDER BY', [currentId], getRelationColumns(currentId, nodes), nodes, edges);
+  }
+  if (/\bLIMIT\b/i.test(upperSql)) {
+    currentId = addOperatorAndResult('Limit', 'LIMIT', [currentId], getRelationColumns(currentId, nodes), nodes, edges);
+  }
+  
+  // Mark final
+  const finalRel = nodes.find(n => n.id === currentId) as RelationNode;
+  if (finalRel) {
+    finalRel.isFinal = true;
+    finalRel.name = 'FINAL';
+  }
 }

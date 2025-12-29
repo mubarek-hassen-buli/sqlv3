@@ -1,17 +1,16 @@
 import { create } from 'zustand';
 import { createLogicalPlan } from '@/lib/sql/planner';
 import { layoutGraph } from '@/lib/graph/layout';
-import { LogicalNode } from '@/lib/sql/types';
+import { LogicalPlanGraph } from '@/lib/sql/types';
 import { LayoutGraph } from '@/lib/graph/types';
 
 interface DiagramState {
   sql: string;
   isAnalyzing: boolean;
   error: string | null;
-  plan: LogicalNode | null;
+  plan: LogicalPlanGraph | null;
   layout: LayoutGraph | null;
   
-  // Actions
   setSql: (sql: string) => void;
   analyze: () => Promise<void>;
   reset: () => void;
@@ -19,7 +18,7 @@ interface DiagramState {
 }
 
 export const useDiagramStore = create<DiagramState>((set, get) => ({
-  sql: "SELECT * FROM users", 
+  sql: "SELECT id, city FROM customers WHERE city = 'London'", 
   isAnalyzing: false,
   error: null,
   plan: null,
@@ -32,10 +31,10 @@ export const useDiagramStore = create<DiagramState>((set, get) => ({
     set({ isAnalyzing: true, error: null });
 
     try {
-      // 1. Create Logical Plan (Semantic)
+      // 1. Create Logical Plan Graph (Relation → Operator → Relation)
       const plan = createLogicalPlan(sql);
 
-      // 2. Layout (Visual)
+      // 2. Layout with ELK
       const layout = await layoutGraph(plan);
 
       set({ plan, layout, isAnalyzing: false });
@@ -52,21 +51,17 @@ export const useDiagramStore = create<DiagramState>((set, get) => ({
 
   save: async (name: string) => {
       const { sql, layout } = get();
-      if (!layout) return; // Nothing to save
-
       try {
-          const res = await fetch('/api/diagrams', {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/json' },
+          const res = await fetch("/api/diagrams", {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
               body: JSON.stringify({ name, sql, layout })
           });
           
           if (!res.ok) throw new Error("Failed to save");
-          
-          // Optionally show success toast here or update local list
       } catch (err: any) {
-          console.error("Save Failed", err);
-          // set error?
+          console.error("Save error:", err);
+          throw err;
       }
   },
 

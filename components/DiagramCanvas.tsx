@@ -2,69 +2,29 @@
 
 import React from 'react';
 import { useDiagramStore } from '@/store/diagram.store';
-import { OperatorType } from '@/lib/sql/types';
+import { RelationNode, OperatorNode } from '@/lib/sql/types';
+import { LayoutNode } from '@/lib/graph/types';
 
-// Color mapping for different operator types
-const OPERATOR_COLORS: Record<OperatorType, { bg: string; border: string; icon: string }> = {
-  [OperatorType.TABLE_SCAN]: { bg: '#1e3a5f', border: '#3b82f6', icon: '📊' },
-  [OperatorType.VALUES]: { bg: '#1e3a5f', border: '#3b82f6', icon: '📋' },
-  [OperatorType.SUBQUERY_SCAN]: { bg: '#2d1f4f', border: '#8b5cf6', icon: '🔍' },
-  [OperatorType.FILTER]: { bg: '#4a2c2a', border: '#ef4444', icon: '🔻' },
-  [OperatorType.PROJECT]: { bg: '#2d4a3e', border: '#22c55e', icon: '📤' },
-  [OperatorType.JOIN]: { bg: '#4a3f2a', border: '#eab308', icon: '🔗' },
-  [OperatorType.AGGREGATE]: { bg: '#3f2d4a', border: '#a855f7', icon: '∑' },
-  [OperatorType.SORT]: { bg: '#2a3f4a', border: '#06b6d4', icon: '↕️' },
-  [OperatorType.LIMIT]: { bg: '#4a2a3f', border: '#ec4899', icon: '✂️' },
-  [OperatorType.RESULT]: { bg: '#2d4a2d', border: '#22c55e', icon: '✓' },
-  [OperatorType.INSERT]: { bg: '#2d4a3e', border: '#22c55e', icon: '➕' },
-  [OperatorType.UPDATE]: { bg: '#4a3f2a', border: '#eab308', icon: '✏️' },
-  [OperatorType.DELETE]: { bg: '#4a2c2a', border: '#ef4444', icon: '🗑️' },
-  [OperatorType.CREATE_TABLE]: { bg: '#1e3a5f', border: '#3b82f6', icon: '🏗️' },
-  [OperatorType.CREATE_VIEW]: { bg: '#1e3a5f', border: '#3b82f6', icon: '👁️' },
+// Operator icons
+const OP_ICONS: Record<string, string> = {
+  'Scan': '📥',
+  'Filter': '🔻',
+  'Project': '📤',
+  'Join': '🔗',
+  'Aggregate': '∑',
+  'Sort': '↕️',
+  'Limit': '✂️',
+  'Insert': '➕',
+  'Update': '✏️',
+  'Delete': '🗑️'
 };
-
-function getOperatorLabel(node: any): string {
-  switch (node.type) {
-    case OperatorType.TABLE_SCAN:
-      return `SCAN: ${node.tableName || 'table'}`;
-    case OperatorType.FILTER:
-      return `FILTER`;
-    case OperatorType.PROJECT:
-      return `SELECT`;
-    case OperatorType.JOIN:
-      return `${node.joinType || ''} JOIN`;
-    case OperatorType.AGGREGATE:
-      return `AGGREGATE`;
-    case OperatorType.SORT:
-      return `ORDER BY`;
-    case OperatorType.LIMIT:
-      return `LIMIT ${node.limit || ''}`;
-    default:
-      return node.type;
-  }
-}
-
-function getOperatorDetail(node: any): string {
-  switch (node.type) {
-    case OperatorType.FILTER:
-      return node.condition || '';
-    case OperatorType.JOIN:
-      return node.onCondition || '';
-    case OperatorType.AGGREGATE:
-      return node.groupByColumns?.join(', ') || '';
-    case OperatorType.SORT:
-      return node.orderBy?.join(', ') || '';
-    default:
-      return '';
-  }
-}
 
 export function DiagramCanvas() {
   const { layout, isAnalyzing, error } = useDiagramStore();
 
   if (isAnalyzing) {
     return (
-      <div className="h-full w-full border-l border-zinc-800 bg-zinc-900 flex items-center justify-center">
+      <div className="h-full w-full bg-zinc-950 flex items-center justify-center">
         <div className="text-zinc-400 animate-pulse">Building Logical Plan...</div>
       </div>
     );
@@ -72,10 +32,10 @@ export function DiagramCanvas() {
 
   if (error) {
     return (
-      <div className="h-full w-full border-l border-zinc-800 bg-zinc-900 flex items-center justify-center">
+      <div className="h-full w-full bg-zinc-950 flex items-center justify-center">
         <div className="text-red-400 text-center p-4 max-w-md">
-          <div className="mb-2 text-lg">⚠️ Analysis Error</div>
-          <div className="text-sm text-zinc-400 font-mono bg-zinc-950 p-3 rounded">{error}</div>
+          <div className="text-lg mb-2">⚠️ Error</div>
+          <div className="text-sm font-mono bg-zinc-900 p-3 rounded">{error}</div>
         </div>
       </div>
     );
@@ -83,25 +43,25 @@ export function DiagramCanvas() {
 
   if (!layout || layout.nodes.length === 0) {
     return (
-      <div className="h-full w-full border-l border-zinc-800 bg-zinc-900 flex items-center justify-center">
+      <div className="h-full w-full bg-zinc-950 flex items-center justify-center">
         <div className="text-zinc-500 text-center">
           <div className="text-4xl mb-4">🔬</div>
-          <div className="mb-2 font-medium">No Logical Plan</div>
-          <div className="text-sm text-zinc-600">Click "Run Analysis" to visualize data flow</div>
+          <div className="font-medium">No Diagram</div>
+          <div className="text-sm text-zinc-600 mt-1">Click "Run Analysis" to visualize data flow</div>
         </div>
       </div>
     );
   }
 
   // Calculate viewBox
-  const padding = 60;
-  const minX = Math.min(...layout.nodes.map(n => n.x)) - padding;
-  const minY = Math.min(...layout.nodes.map(n => n.y)) - padding;
-  const maxX = Math.max(...layout.nodes.map(n => n.x + n.width)) + padding;
-  const maxY = Math.max(...layout.nodes.map(n => n.y + n.height)) + padding;
+  const pad = 40;
+  const minX = Math.min(...layout.nodes.map(n => n.x)) - pad;
+  const minY = Math.min(...layout.nodes.map(n => n.y)) - pad;
+  const maxX = Math.max(...layout.nodes.map(n => n.x + n.width)) + pad;
+  const maxY = Math.max(...layout.nodes.map(n => n.y + n.height)) + pad;
 
   return (
-    <div className="h-full w-full border-l border-zinc-800 bg-zinc-950 overflow-auto">
+    <div className="h-full w-full bg-zinc-950 overflow-auto">
       <svg
         width="100%"
         height="100%"
@@ -110,132 +70,131 @@ export function DiagramCanvas() {
         className="min-h-full"
       >
         <defs>
-          <marker
-            id="arrowhead"
-            markerWidth="10"
-            markerHeight="7"
-            refX="9"
-            refY="3.5"
-            orient="auto"
-          >
-            <polygon points="0 0, 10 3.5, 0 7" fill="#6b7280" />
+          <marker id="arrow" markerWidth="8" markerHeight="6" refX="7" refY="3" orient="auto">
+            <polygon points="0 0, 8 3, 0 6" fill="#6b7280" />
           </marker>
         </defs>
 
         {/* Edges */}
         {layout.edges.map(edge => {
-          if (!edge.sections || edge.sections.length === 0) return null;
-          const section = edge.sections[0];
-          
-          let pathD = `M ${section.startPoint.x} ${section.startPoint.y}`;
-          if (section.bendPoints) {
-            section.bendPoints.forEach(bp => {
-              pathD += ` L ${bp.x} ${bp.y}`;
-            });
+          if (!edge.sections?.length) return null;
+          const s = edge.sections[0];
+          let d = `M ${s.startPoint.x} ${s.startPoint.y}`;
+          if (s.bendPoints) {
+            s.bendPoints.forEach(bp => { d += ` L ${bp.x} ${bp.y}`; });
           }
-          pathD += ` L ${section.endPoint.x} ${section.endPoint.y}`;
-
-          return (
-            <path
-              key={edge.id}
-              d={pathD}
-              fill="none"
-              stroke="#4b5563"
-              strokeWidth="2"
-              markerEnd="url(#arrowhead)"
-            />
-          );
+          d += ` L ${s.endPoint.x} ${s.endPoint.y}`;
+          return <path key={edge.id} d={d} fill="none" stroke="#4b5563" strokeWidth="2" markerEnd="url(#arrow)" />;
         })}
 
         {/* Nodes */}
         {layout.nodes.map(node => {
-          const colors = OPERATOR_COLORS[node.type as OperatorType] || { bg: '#1f2937', border: '#6b7280', icon: '?' };
-          const label = getOperatorLabel(node);
-          const detail = getOperatorDetail(node);
-          const columns = node.schema?.columns?.slice(0, 4) || []; // Show max 4 columns
-          const hasMoreCols = (node.schema?.columns?.length || 0) > 4;
-
-          return (
-            <g key={node.id}>
-              {/* Node Background */}
-              <rect
-                x={node.x}
-                y={node.y}
-                width={node.width}
-                height={node.height}
-                rx="8"
-                ry="8"
-                fill={colors.bg}
-                stroke={colors.border}
-                strokeWidth="2"
-              />
-              
-              {/* Header */}
-              <rect
-                x={node.x}
-                y={node.y}
-                width={node.width}
-                height={28}
-                rx="8"
-                ry="8"
-                fill={colors.border}
-                opacity="0.3"
-              />
-              
-              {/* Icon + Label */}
-              <text
-                x={node.x + 12}
-                y={node.y + 19}
-                fill="#e5e7eb"
-                fontSize="12"
-                fontWeight="600"
-                fontFamily="monospace"
-              >
-                {colors.icon} {label}
-              </text>
-
-              {/* Detail (condition, etc) */}
-              {detail && (
-                <text
-                  x={node.x + 12}
-                  y={node.y + 44}
-                  fill="#9ca3af"
-                  fontSize="10"
-                  fontFamily="monospace"
-                >
-                  {detail.length > 25 ? detail.slice(0, 25) + '...' : detail}
-                </text>
-              )}
-
-              {/* Schema Columns */}
-              {columns.map((col, i) => (
-                <text
-                  key={i}
-                  x={node.x + 12}
-                  y={node.y + (detail ? 62 : 48) + i * 16}
-                  fill="#6b7280"
-                  fontSize="10"
-                  fontFamily="monospace"
-                >
-                  • {col.name}
-                </text>
-              ))}
-              
-              {hasMoreCols && (
-                <text
-                  x={node.x + 12}
-                  y={node.y + (detail ? 62 : 48) + columns.length * 16}
-                  fill="#4b5563"
-                  fontSize="10"
-                  fontFamily="monospace"
-                >
-                  ... +{(node.schema?.columns?.length || 0) - 4} more
-                </text>
-              )}
-            </g>
-          );
+          if (node.nodeType === 'Relation') {
+            return <RelationBox key={node.id} node={node as LayoutNode & RelationNode} />;
+          } else {
+            return <OperatorBox key={node.id} node={node as LayoutNode & OperatorNode} />;
+          }
         })}
       </svg>
     </div>
+  );
+}
+
+// ==================== RELATION BOX (BIG) ====================
+function RelationBox({ node }: { node: LayoutNode & RelationNode }) {
+  // Color based on type
+  let borderColor = '#6b7280'; // gray for intermediate
+  let bgColor = '#1f2937';
+  
+  if (node.isBase) {
+    borderColor = '#22c55e'; // green for base tables
+    bgColor = '#14532d';
+  }
+  if (node.isFinal) {
+    borderColor = '#ef4444'; // red for final result
+    bgColor = '#450a0a';
+  }
+
+  const cols = node.columns.slice(0, 5); // Max 5 columns displayed
+  const hasMore = node.columns.length > 5;
+
+  return (
+    <g>
+      {/* Main box */}
+      <rect
+        x={node.x}
+        y={node.y}
+        width={node.width}
+        height={node.height}
+        rx="6"
+        fill={bgColor}
+        stroke={borderColor}
+        strokeWidth="2"
+      />
+      
+      {/* Header */}
+      <rect
+        x={node.x}
+        y={node.y}
+        width={node.width}
+        height={24}
+        rx="6"
+        fill={borderColor}
+        opacity="0.3"
+      />
+      <text x={node.x + 10} y={node.y + 17} fill="#fff" fontSize="12" fontWeight="600">
+        {node.name}
+      </text>
+      
+      {/* Columns */}
+      {cols.map((col, i) => (
+        <text
+          key={i}
+          x={node.x + 10}
+          y={node.y + 40 + i * 16}
+          fill="#9ca3af"
+          fontSize="10"
+          fontFamily="monospace"
+        >
+          {col.name} {col.dataType ? `(${col.dataType})` : ''}
+        </text>
+      ))}
+      
+      {hasMore && (
+        <text x={node.x + 10} y={node.y + 40 + cols.length * 16} fill="#6b7280" fontSize="10">
+          ... +{node.columns.length - 5} more
+        </text>
+      )}
+    </g>
+  );
+}
+
+// ==================== OPERATOR BOX (SMALL) ====================
+function OperatorBox({ node }: { node: LayoutNode & OperatorNode }) {
+  const icon = OP_ICONS[node.operator] || '⚙️';
+  
+  return (
+    <g>
+      <rect
+        x={node.x}
+        y={node.y}
+        width={node.width}
+        height={node.height}
+        rx="18"
+        fill="#374151"
+        stroke="#6b7280"
+        strokeWidth="1"
+      />
+      <text
+        x={node.x + node.width / 2}
+        y={node.y + node.height / 2 + 4}
+        fill="#e5e7eb"
+        fontSize="11"
+        fontWeight="500"
+        textAnchor="middle"
+      >
+        {icon} {node.operator}
+      </text>
+    </g>
   );
 }

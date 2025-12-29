@@ -1,102 +1,97 @@
 /**
- * Logical Query Plan Types
- * Defines the structure for the Relational Algebra Tree
+ * Relation-Based Logical Plan Types
+ * Following up2.doc requirements: Relations are first-class, Operators are transformers
  */
 
-export enum OperatorType {
-  // Sources
-  TABLE_SCAN = 'TABLE_SCAN',
-  VALUES = 'VALUES',
-  SUBQUERY_SCAN = 'SUBQUERY_SCAN',
+// ==================== COLUMN & SCHEMA ====================
 
-  // Transformations
-  FILTER = 'FILTER',
-  PROJECT = 'PROJECT',
-  JOIN = 'JOIN',
-  AGGREGATE = 'AGGREGATE',
-  SORT = 'SORT',
-  LIMIT = 'LIMIT',
-
-  // Sinks (Output)
-  RESULT = 'RESULT',
-  INSERT = 'INSERT',
-  UPDATE = 'UPDATE',
-  DELETE = 'DELETE',
-  CREATE_TABLE = 'CREATE_TABLE',
-  CREATE_VIEW = 'CREATE_VIEW'
-}
-
-export enum JoinType {
-  INNER = 'INNER',
-  LEFT = 'LEFT',
-  RIGHT = 'RIGHT',
-  FULL = 'FULL',
-  CROSS = 'CROSS',
-}
-
-export interface ColumnSource {
-  table?: string;
-  column?: string;
-  expression?: string; // For calculated columns like "sal * 12"
-}
-
-export interface Column {
+export interface ColumnDef {
   name: string;
-  type: string; // e.g., 'INTEGER', 'VARCHAR', 'UNKNOWN'
-  source?: ColumnSource;
+  dataType?: string;     // e.g., 'INTEGER', 'VARCHAR'
+  source?: string;       // lineage: where this column came from (e.g., "emp.sal", "SUM(sal)")
+  table?: string;        // original table name
 }
 
-export interface Schema {
-  columns: Column[];
-  relationName?: string; // e.g., "JOIN_RESULT_1"
-}
+// ==================== NODE TYPES ====================
 
-// Base Interface for all Logical Nodes
-export interface LogicalNode {
+export type NodeType = "Relation" | "Operator";
+
+export type OperatorKind = 
+  | "Scan" 
+  | "Filter" 
+  | "Project" 
+  | "Join" 
+  | "Aggregate" 
+  | "Sort" 
+  | "Limit"
+  | "Insert"
+  | "Update"
+  | "Delete";
+
+// Relation Node (BIG - shows columns)
+export interface RelationNode {
   id: string;
-  type: OperatorType;
-  schema: Schema;
-  children: LogicalNode[];
-  metadata?: Record<string, any>;
+  nodeType: "Relation";
+  name: string;           // "customers", "RESULT_1", "FINAL"
+  isBase: boolean;        // true = source table, false = intermediate/result
+  isFinal: boolean;       // true = final query result
+  columns: ColumnDef[];
 }
 
-// --- Specific Node Interfaces ---
-
-export interface TableScanNode extends LogicalNode {
-  type: OperatorType.TABLE_SCAN;
-  tableName: string;
-  alias?: string;
+// Operator Node (SMALL - transformer)
+export interface OperatorNode {
+  id: string;
+  nodeType: "Operator";
+  operator: OperatorKind;
+  details: string;        // conditions, expressions, join keys
 }
 
-export interface FilterNode extends LogicalNode {
-  type: OperatorType.FILTER;
-  condition: string; // e.g., "sal > 1000"
+// Union type for graph nodes
+export type GraphNodeData = RelationNode | OperatorNode;
+
+// ==================== GRAPH / DAG ====================
+
+export interface Edge {
+  id: string;
+  from: string;           // source node id
+  to: string;             // target node id
 }
 
-export interface ProjectNode extends LogicalNode {
-  type: OperatorType.PROJECT;
-  expressions: string[]; // e.g., ["name", "sal * 12 AS annual"]
+export interface LogicalPlanGraph {
+  nodes: GraphNodeData[];
+  edges: Edge[];
 }
 
-export interface JoinNode extends LogicalNode {
-  type: OperatorType.JOIN;
-  joinType: JoinType;
-  onCondition?: string; // e.g., "u.id = o.user_id"
-}
+// ==================== MOCK SCHEMAS ====================
 
-export interface AggregateNode extends LogicalNode {
-  type: OperatorType.AGGREGATE;
-  groupByColumns: string[];
-  aggregates: string[]; // e.g., ["COUNT(*)", "SUM(sal)"]
-}
-
-export interface SortNode extends LogicalNode {
-  type: OperatorType.SORT;
-  orderBy: string[]; // e.g., ["created_at DESC"]
-}
-
-export interface LimitNode extends LogicalNode {
-  type: OperatorType.LIMIT;
-  limit: number;
-  offset?: number;
-}
+export const MOCK_SCHEMAS: Record<string, ColumnDef[]> = {
+  'users': [
+    { name: 'id', dataType: 'INT', table: 'users' },
+    { name: 'name', dataType: 'VARCHAR', table: 'users' },
+    { name: 'email', dataType: 'VARCHAR', table: 'users' },
+    { name: 'created_at', dataType: 'TIMESTAMP', table: 'users' }
+  ],
+  'orders': [
+    { name: 'id', dataType: 'INT', table: 'orders' },
+    { name: 'user_id', dataType: 'INT', table: 'orders' },
+    { name: 'amount', dataType: 'DECIMAL', table: 'orders' },
+    { name: 'status', dataType: 'VARCHAR', table: 'orders' }
+  ],
+  'customers': [
+    { name: 'id', dataType: 'INT', table: 'customers' },
+    { name: 'name', dataType: 'VARCHAR', table: 'customers' },
+    { name: 'city', dataType: 'VARCHAR', table: 'customers' }
+  ],
+  'emp': [
+    { name: 'empno', dataType: 'INT', table: 'emp' },
+    { name: 'ename', dataType: 'VARCHAR', table: 'emp' },
+    { name: 'job', dataType: 'VARCHAR', table: 'emp' },
+    { name: 'sal', dataType: 'DECIMAL', table: 'emp' },
+    { name: 'deptno', dataType: 'INT', table: 'emp' }
+  ],
+  'dept': [
+    { name: 'deptno', dataType: 'INT', table: 'dept' },
+    { name: 'dname', dataType: 'VARCHAR', table: 'dept' },
+    { name: 'loc', dataType: 'VARCHAR', table: 'dept' }
+  ]
+};
