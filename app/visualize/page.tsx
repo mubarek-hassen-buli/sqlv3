@@ -17,11 +17,6 @@ export default function VisualizePage() {
     }
   }, [status]);
 
-  useEffect(() => {
-    // Initial Analysis
-    if (session) analyze();
-  }, [analyze, session]);
-
   if (status === "loading") {
       return <div className="h-screen w-screen flex items-center justify-center bg-zinc-950 text-white">Loading...</div>;
   }
