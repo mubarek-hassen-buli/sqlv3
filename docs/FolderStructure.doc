@@ -1,0 +1,49 @@
+📁 Project Folder Structure (Simple & Correct)
+sql-visualizer/
+├─ app/                         # Next.js App Router
+│  ├─ page.tsx                  # Landing / editor page
+│  ├─ visualize/
+│  │  └─ page.tsx               # Diagram view page
+│  ├─ api/
+│  │  └─ analyze/
+│  │     └─ route.ts            # POST SQL → Diagram JSON
+│  ├─ layout.tsx
+│  └─ globals.css
+│
+├─ components/                  # UI components only
+│  ├─ SqlEditor.tsx             # Monaco editor
+│  ├─ DiagramCanvas.tsx         # Excalidraw renderer
+│  ├─ NodeInspector.tsx         # Clicked node details
+│  └─ Toolbar.tsx
+│
+├─ lib/                         # Core logic (backend brain)
+│  ├─ sql/
+│  │  ├─ parse.ts               # SQL → AST
+│  │  ├─ analyze.ts             # AST → Execution DAG
+│  │  ├─ operators.ts           # Operator types & helpers
+│  │  └─ warnings.ts            # Static analysis rules
+│  │
+│  ├─ graph/
+│  │  ├─ build.ts               # DAG → graph nodes/edges
+│  │  ├─ layout.ts              # ELK.js layout
+│  │  └─ types.ts               # GraphNode / GraphEdge types
+│  │
+│  └─ ai/
+│     └─ explain.ts             # Gemini explanation (optional)
+│
+├─ store/                       # Zustand stores
+│  ├─ diagram.store.ts          # Nodes, edges, selection
+│  └─ ui.store.ts               # Zoom, view mode, panels
+│
+├─ db/                          # Drizzle + Neon
+│  ├─ schema.ts                 # users, queries, diagrams
+│  └─ index.ts
+│
+├─ docs/
+│  └─ AppIdea.md                # Your app idea doc
+│
+├─ public/
+│
+├─ package.json
+├─ tsconfig.json
+└─ README.md
