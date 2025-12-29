@@ -3,7 +3,7 @@
 import { useSession, signIn } from "next-auth/react";
 import { useEffect, useState } from "react";
 import Link from "next/link";
-import { Database, Plus } from "lucide-react";
+import { Database, Plus, Trash2 } from "lucide-react";
 
 interface Diagram {
   id: string;
@@ -17,6 +17,21 @@ export default function DashboardPage() {
   const [diagrams, setDiagrams] = useState<Diagram[]>([]);
   const [loading, setLoading] = useState(true);
 
+  const fetchDiagrams = async () => {
+    if (!session) return;
+    try {
+      const res = await fetch("/api/diagrams");
+      const data = await res.json();
+      if (Array.isArray(data)) {
+        setDiagrams(data);
+      }
+    } catch (error) {
+      console.error("Failed to fetch diagrams:", error);
+    } finally {
+      setLoading(false);
+    }
+  };
+
   useEffect(() => {
     if (status === "unauthenticated") {
       signIn("google");
@@ -24,17 +39,29 @@ export default function DashboardPage() {
   }, [status]);
 
   useEffect(() => {
-    if (session) {
-      fetch("/api/diagrams")
-        .then((res) => res.json())
-        .then((data) => {
-          if (Array.isArray(data)) {
-            setDiagrams(data);
-          }
-        })
-        .finally(() => setLoading(false));
-    }
+    fetchDiagrams();
   }, [session]);
+
+  const handleDelete = async (id: string, e: React.MouseEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    
+    if (!confirm("Are you sure you want to delete this diagram?")) return;
+
+    try {
+      const res = await fetch(`/api/diagrams?id=${id}`, {
+        method: "DELETE",
+      });
+      if (res.ok) {
+        setDiagrams(diagrams.filter(d => d.id !== id));
+      } else {
+        alert("Failed to delete diagram");
+      }
+    } catch (error) {
+      console.error("Delete error:", error);
+      alert("An error occurred while deleting");
+    }
+  };
 
   if (status === "loading" || loading) {
     return (
@@ -118,7 +145,13 @@ export default function DashboardPage() {
                              >
                                 Open
                              </Link>
-                             {/* Delete button could go here */}
+                             <button 
+                                onClick={(e) => handleDelete(diagram.id, e)}
+                                className="p-2 bg-red-500/10 hover:bg-red-500/20 text-red-400 rounded-lg transition-colors"
+                                title="Delete diagram"
+                             >
+                                <Trash2 className="w-4 h-4" />
+                             </button>
                         </div>
                     </div>
                 ))}

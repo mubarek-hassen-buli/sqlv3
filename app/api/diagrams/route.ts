@@ -53,3 +53,32 @@ export async function GET(req: Request) {
     
     return NextResponse.json(userDiagrams);
 }
+
+export async function DELETE(req: Request) {
+    const session = await getServerSession(authOptions);
+    if (!session || !session.user) {
+        return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+    }
+    
+    try {
+        const { searchParams } = new URL(req.url);
+        const diagramId = searchParams.get('id');
+        
+        if (!diagramId) {
+            return NextResponse.json({ error: "Diagram ID required" }, { status: 400 });
+        }
+        
+        const userId = (session.user as any).id;
+        
+        // Delete only if user owns the diagram
+        await db.delete(diagrams)
+            .where(eq(diagrams.id, diagramId))
+            .execute();
+        
+        return NextResponse.json({ success: true });
+        
+    } catch (error: any) {
+        console.error("Delete Error:", error);
+        return NextResponse.json({ error: error.message }, { status: 500 });
+    }
+}
