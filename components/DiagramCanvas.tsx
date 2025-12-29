@@ -1,16 +1,71 @@
 "use client";
 
-import React, { useEffect, useRef } from 'react';
+import React from 'react';
 import { useDiagramStore } from '@/store/diagram.store';
+import { OperatorType } from '@/lib/sql/types';
+
+// Color mapping for different operator types
+const OPERATOR_COLORS: Record<OperatorType, { bg: string; border: string; icon: string }> = {
+  [OperatorType.TABLE_SCAN]: { bg: '#1e3a5f', border: '#3b82f6', icon: '📊' },
+  [OperatorType.VALUES]: { bg: '#1e3a5f', border: '#3b82f6', icon: '📋' },
+  [OperatorType.SUBQUERY_SCAN]: { bg: '#2d1f4f', border: '#8b5cf6', icon: '🔍' },
+  [OperatorType.FILTER]: { bg: '#4a2c2a', border: '#ef4444', icon: '🔻' },
+  [OperatorType.PROJECT]: { bg: '#2d4a3e', border: '#22c55e', icon: '📤' },
+  [OperatorType.JOIN]: { bg: '#4a3f2a', border: '#eab308', icon: '🔗' },
+  [OperatorType.AGGREGATE]: { bg: '#3f2d4a', border: '#a855f7', icon: '∑' },
+  [OperatorType.SORT]: { bg: '#2a3f4a', border: '#06b6d4', icon: '↕️' },
+  [OperatorType.LIMIT]: { bg: '#4a2a3f', border: '#ec4899', icon: '✂️' },
+  [OperatorType.RESULT]: { bg: '#2d4a2d', border: '#22c55e', icon: '✓' },
+  [OperatorType.INSERT]: { bg: '#2d4a3e', border: '#22c55e', icon: '➕' },
+  [OperatorType.UPDATE]: { bg: '#4a3f2a', border: '#eab308', icon: '✏️' },
+  [OperatorType.DELETE]: { bg: '#4a2c2a', border: '#ef4444', icon: '🗑️' },
+  [OperatorType.CREATE_TABLE]: { bg: '#1e3a5f', border: '#3b82f6', icon: '🏗️' },
+  [OperatorType.CREATE_VIEW]: { bg: '#1e3a5f', border: '#3b82f6', icon: '👁️' },
+};
+
+function getOperatorLabel(node: any): string {
+  switch (node.type) {
+    case OperatorType.TABLE_SCAN:
+      return `SCAN: ${node.tableName || 'table'}`;
+    case OperatorType.FILTER:
+      return `FILTER`;
+    case OperatorType.PROJECT:
+      return `SELECT`;
+    case OperatorType.JOIN:
+      return `${node.joinType || ''} JOIN`;
+    case OperatorType.AGGREGATE:
+      return `AGGREGATE`;
+    case OperatorType.SORT:
+      return `ORDER BY`;
+    case OperatorType.LIMIT:
+      return `LIMIT ${node.limit || ''}`;
+    default:
+      return node.type;
+  }
+}
+
+function getOperatorDetail(node: any): string {
+  switch (node.type) {
+    case OperatorType.FILTER:
+      return node.condition || '';
+    case OperatorType.JOIN:
+      return node.onCondition || '';
+    case OperatorType.AGGREGATE:
+      return node.groupByColumns?.join(', ') || '';
+    case OperatorType.SORT:
+      return node.orderBy?.join(', ') || '';
+    default:
+      return '';
+  }
+}
 
 export function DiagramCanvas() {
   const { layout, isAnalyzing, error } = useDiagramStore();
-  const containerRef = useRef<HTMLDivElement>(null);
 
   if (isAnalyzing) {
     return (
       <div className="h-full w-full border-l border-zinc-800 bg-zinc-900 flex items-center justify-center">
-        <div className="text-zinc-400 animate-pulse">Analyzing...</div>
+        <div className="text-zinc-400 animate-pulse">Building Logical Plan...</div>
       </div>
     );
   }
@@ -18,9 +73,9 @@ export function DiagramCanvas() {
   if (error) {
     return (
       <div className="h-full w-full border-l border-zinc-800 bg-zinc-900 flex items-center justify-center">
-        <div className="text-red-400 text-center p-4">
-          <div className="mb-2">Error</div>
-          <div className="text-sm text-zinc-500">{error}</div>
+        <div className="text-red-400 text-center p-4 max-w-md">
+          <div className="mb-2 text-lg">⚠️ Analysis Error</div>
+          <div className="text-sm text-zinc-400 font-mono bg-zinc-950 p-3 rounded">{error}</div>
         </div>
       </div>
     );
@@ -30,34 +85,27 @@ export function DiagramCanvas() {
     return (
       <div className="h-full w-full border-l border-zinc-800 bg-zinc-900 flex items-center justify-center">
         <div className="text-zinc-500 text-center">
-          <div className="mb-2">No diagram</div>
-          <div className="text-sm">Click "Run Analysis" to visualize your SQL</div>
+          <div className="text-4xl mb-4">🔬</div>
+          <div className="mb-2 font-medium">No Logical Plan</div>
+          <div className="text-sm text-zinc-600">Click "Run Analysis" to visualize data flow</div>
         </div>
       </div>
     );
   }
 
-  // Calculate bounds for viewBox
-  let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
-  layout.nodes.forEach(node => {
-    minX = Math.min(minX, node.x);
-    minY = Math.min(minY, node.y);
-    maxX = Math.max(maxX, node.x + node.width);
-    maxY = Math.max(maxY, node.y + node.height);
-  });
-
-  const padding = 50;
-  const viewBoxX = minX - padding;
-  const viewBoxY = minY - padding;
-  const viewBoxWidth = (maxX - minX) + padding * 2;
-  const viewBoxHeight = (maxY - minY) + padding * 2;
+  // Calculate viewBox
+  const padding = 60;
+  const minX = Math.min(...layout.nodes.map(n => n.x)) - padding;
+  const minY = Math.min(...layout.nodes.map(n => n.y)) - padding;
+  const maxX = Math.max(...layout.nodes.map(n => n.x + n.width)) + padding;
+  const maxY = Math.max(...layout.nodes.map(n => n.y + n.height)) + padding;
 
   return (
-    <div ref={containerRef} className="h-full w-full border-l border-zinc-800 bg-zinc-900 overflow-auto">
+    <div className="h-full w-full border-l border-zinc-800 bg-zinc-950 overflow-auto">
       <svg
         width="100%"
         height="100%"
-        viewBox={`${viewBoxX} ${viewBoxY} ${viewBoxWidth} ${viewBoxHeight}`}
+        viewBox={`${minX} ${minY} ${maxX - minX} ${maxY - minY}`}
         preserveAspectRatio="xMidYMid meet"
         className="min-h-full"
       >
@@ -76,17 +124,15 @@ export function DiagramCanvas() {
 
         {/* Edges */}
         {layout.edges.map(edge => {
-          if (edge.sections.length === 0) return null;
+          if (!edge.sections || edge.sections.length === 0) return null;
           const section = edge.sections[0];
           
           let pathD = `M ${section.startPoint.x} ${section.startPoint.y}`;
-          
-          if (section.bendPoints && section.bendPoints.length > 0) {
+          if (section.bendPoints) {
             section.bendPoints.forEach(bp => {
               pathD += ` L ${bp.x} ${bp.y}`;
             });
           }
-          
           pathD += ` L ${section.endPoint.x} ${section.endPoint.y}`;
 
           return (
@@ -94,7 +140,7 @@ export function DiagramCanvas() {
               key={edge.id}
               d={pathD}
               fill="none"
-              stroke="#6b7280"
+              stroke="#4b5563"
               strokeWidth="2"
               markerEnd="url(#arrowhead)"
             />
@@ -102,32 +148,93 @@ export function DiagramCanvas() {
         })}
 
         {/* Nodes */}
-        {layout.nodes.map(node => (
-          <g key={node.id}>
-            <rect
-              x={node.x}
-              y={node.y}
-              width={node.width}
-              height={node.height}
-              rx="8"
-              ry="8"
-              fill="#1f2937"
-              stroke="#3b82f6"
-              strokeWidth="2"
-            />
-            <text
-              x={node.x + node.width / 2}
-              y={node.y + node.height / 2}
-              textAnchor="middle"
-              dominantBaseline="middle"
-              fill="#e5e7eb"
-              fontSize="14"
-              fontFamily="monospace"
-            >
-              {node.label}
-            </text>
-          </g>
-        ))}
+        {layout.nodes.map(node => {
+          const colors = OPERATOR_COLORS[node.type as OperatorType] || { bg: '#1f2937', border: '#6b7280', icon: '?' };
+          const label = getOperatorLabel(node);
+          const detail = getOperatorDetail(node);
+          const columns = node.schema?.columns?.slice(0, 4) || []; // Show max 4 columns
+          const hasMoreCols = (node.schema?.columns?.length || 0) > 4;
+
+          return (
+            <g key={node.id}>
+              {/* Node Background */}
+              <rect
+                x={node.x}
+                y={node.y}
+                width={node.width}
+                height={node.height}
+                rx="8"
+                ry="8"
+                fill={colors.bg}
+                stroke={colors.border}
+                strokeWidth="2"
+              />
+              
+              {/* Header */}
+              <rect
+                x={node.x}
+                y={node.y}
+                width={node.width}
+                height={28}
+                rx="8"
+                ry="8"
+                fill={colors.border}
+                opacity="0.3"
+              />
+              
+              {/* Icon + Label */}
+              <text
+                x={node.x + 12}
+                y={node.y + 19}
+                fill="#e5e7eb"
+                fontSize="12"
+                fontWeight="600"
+                fontFamily="monospace"
+              >
+                {colors.icon} {label}
+              </text>
+
+              {/* Detail (condition, etc) */}
+              {detail && (
+                <text
+                  x={node.x + 12}
+                  y={node.y + 44}
+                  fill="#9ca3af"
+                  fontSize="10"
+                  fontFamily="monospace"
+                >
+                  {detail.length > 25 ? detail.slice(0, 25) + '...' : detail}
+                </text>
+              )}
+
+              {/* Schema Columns */}
+              {columns.map((col, i) => (
+                <text
+                  key={i}
+                  x={node.x + 12}
+                  y={node.y + (detail ? 62 : 48) + i * 16}
+                  fill="#6b7280"
+                  fontSize="10"
+                  fontFamily="monospace"
+                >
+                  • {col.name}
+                </text>
+              ))}
+              
+              {hasMoreCols && (
+                <text
+                  x={node.x + 12}
+                  y={node.y + (detail ? 62 : 48) + columns.length * 16}
+                  fill="#4b5563"
+                  fontSize="10"
+                  fontFamily="monospace"
+                >
+                  ... +{(node.schema?.columns?.length || 0) - 4} more
+                </text>
+              )}
+            </g>
+          );
+        })}
       </svg>
     </div>
   );

@@ -1,16 +1,17 @@
 "use client";
 
 import React, { useEffect, useState } from 'react';
-import { useSession, signIn } from 'next-auth/react';
+import { useSession, signIn, signOut } from 'next-auth/react';
 import { SqlEditor } from '@/components/SqlEditor';
 import { DiagramCanvas } from '@/components/DiagramCanvas';
 import { useDiagramStore } from '@/store/diagram.store';
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
+import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuLabel, DropdownMenuSeparator, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import Link from "next/link";
-// import { ResizablePanelGroup, ResizablePanel, ResizableHandle } from '@/components/ui/resizable'; 
+import { LogOut, ChevronDown } from "lucide-react";
 
 export default function VisualizePage() {
   const { data: session, status } = useSession();
@@ -52,12 +53,32 @@ export default function VisualizePage() {
             </Link>
         </nav>
         <div className="ml-auto flex items-center gap-4">
-             <div className="flex items-center gap-2 text-sm text-zinc-400 mr-4">
-                 {session?.user?.image && (
-                     <img src={session.user.image} alt="User" className="w-6 h-6 rounded-full" />
-                 )}
-                 <span>{session?.user?.name}</span>
-             </div>
+             {/* Profile Dropdown */}
+             <DropdownMenu>
+                <DropdownMenuTrigger asChild>
+                    <button className="flex items-center gap-2 text-sm text-zinc-400 hover:text-white transition-colors px-2 py-1 rounded-lg hover:bg-zinc-800">
+                        {session?.user?.image && (
+                            <img src={session.user.image} alt="User" className="w-6 h-6 rounded-full" />
+                        )}
+                        <span>{session?.user?.name}</span>
+                        <ChevronDown className="w-4 h-4" />
+                    </button>
+                </DropdownMenuTrigger>
+                <DropdownMenuContent className="w-48 bg-zinc-900 border-zinc-800 text-white">
+                    <DropdownMenuLabel>
+                        <div className="text-sm font-medium truncate">{session?.user?.name}</div>
+                        <div className="text-xs text-zinc-500 truncate font-normal">{session?.user?.email}</div>
+                    </DropdownMenuLabel>
+                    <DropdownMenuSeparator className="bg-zinc-800" />
+                    <DropdownMenuItem 
+                        onClick={() => signOut({ callbackUrl: '/' })}
+                        className="text-red-400 focus:text-red-400 focus:bg-zinc-800 cursor-pointer"
+                    >
+                        <LogOut className="w-4 h-4 mr-2" />
+                        Sign Out
+                    </DropdownMenuItem>
+                </DropdownMenuContent>
+             </DropdownMenu>
         <div className="flex gap-2">
             <Dialog open={isSaveOpen} onOpenChange={setIsSaveOpen}>
               <DialogTrigger asChild>

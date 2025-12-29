@@ -1,14 +1,14 @@
 import { create } from 'zustand';
-import { analyzeSql } from '@/lib/sql/analyze';
+import { createLogicalPlan } from '@/lib/sql/planner';
 import { layoutGraph } from '@/lib/graph/layout';
-import { ExecutionDAG } from '@/lib/sql/operators';
+import { LogicalNode } from '@/lib/sql/types';
 import { LayoutGraph } from '@/lib/graph/types';
 
 interface DiagramState {
   sql: string;
   isAnalyzing: boolean;
   error: string | null;
-  dag: ExecutionDAG | null;
+  plan: LogicalNode | null;
   layout: LayoutGraph | null;
   
   // Actions
@@ -19,10 +19,10 @@ interface DiagramState {
 }
 
 export const useDiagramStore = create<DiagramState>((set, get) => ({
-  sql: "SELECT * FROM users", // Default Value
+  sql: "SELECT * FROM users", 
   isAnalyzing: false,
   error: null,
-  dag: null,
+  plan: null,
   layout: null,
 
   setSql: (sql) => set({ sql }),
@@ -32,20 +32,19 @@ export const useDiagramStore = create<DiagramState>((set, get) => ({
     set({ isAnalyzing: true, error: null });
 
     try {
-      // 1. Analyze (CPU bound, but fast enough for now to run in main thread)
-      // In a real heavy app, might move to WebWorker
-      const dag = analyzeSql(sql);
+      // 1. Create Logical Plan (Semantic)
+      const plan = createLogicalPlan(sql);
 
-      // 2. Layout (Async ELK)
-      const layout = await layoutGraph(dag);
+      // 2. Layout (Visual)
+      const layout = await layoutGraph(plan);
 
-      set({ dag, layout, isAnalyzing: false });
+      set({ plan, layout, isAnalyzing: false });
     } catch (err: any) {
       console.error("Analysis Failed:", err);
       set({ 
         error: err.message || "Failed to analyze SQL", 
         isAnalyzing: false,
-        dag: null,
+        plan: null,
         layout: null
       });
     }
@@ -74,7 +73,7 @@ export const useDiagramStore = create<DiagramState>((set, get) => ({
   reset: () => set({ 
     sql: "", 
     error: null, 
-    dag: null, 
+    plan: null, 
     layout: null 
   })
 }));

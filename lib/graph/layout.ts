@@ -1,90 +1,93 @@
-import ELK, { ElkNode, ElkExtendedEdge } from 'elkjs';
-import { ExecutionDAG, ExecutionNode, ExecutionEdge } from '../sql/operators';
+
+import ELK from 'elkjs/lib/elk.bundled';
+import { LogicalNode } from '../sql/types';
 import { LayoutGraph, GraphNode, GraphEdge } from './types';
 
 const elk = new ELK();
 
-const NODE_WIDTH = 180;
-const NODE_HEIGHT = 60;
+export async function layoutGraph(root: LogicalNode): Promise<LayoutGraph> {
+  if (!root) return { nodes: [], edges: [], width: 0, height: 0 };
 
-/**
- * Transforms ExecutionDAG (logic) -> ELK Graph -> LayoutGraph (visual)
- */
-export async function layoutGraph(dag: ExecutionDAG): Promise<LayoutGraph> {
+  // 1. Flatten the tree into nodes and edges for ELK
+  const elkNodes: any[] = [];
+  const elkEdges: any[] = [];
   
-  // 1. Convert DAG to ELK format
-  const elkNodes: ElkNode[] = dag.nodes.map(node => ({
-    id: node.id,
-    width: NODE_WIDTH,
-    height: NODE_HEIGHT,
-    labels: [{ text: node.label }], // ELK uses labels for sizing if needed, but we fix size
-    layoutOptions: {
-      // Per-node options
-      'elk.portConstraints': 'FIXED_SIDE', // Helpful for top-down
-    },
-    // We can store original data in a custom prop to retrieve later if needed, 
-    // but ELK cleans output often. We usually map back by ID.
-  }));
+  function traverse(node: LogicalNode, parentId?: string) {
+    const colCount = node.schema?.columns?.length || 0;
+    
+    elkNodes.push({
+      id: node.id,
+      width: 220,
+      height: 80 + Math.min(colCount, 5) * 18, // Cap height for large schemas
+      labels: [{ text: node.type }]
+    });
 
-  const elkEdges: ElkExtendedEdge[] = dag.edges.map(edge => ({
-    id: edge.id,
-    sources: [edge.source],
-    targets: [edge.target],
-    labels: edge.label ? [{ text: edge.label }] : []
-  }));
+    // Edge: Child -> Parent (Data flows from sources to sinks)
+    if (parentId) {
+      elkEdges.push({
+        id: `e-${node.id}-${parentId}`,
+        sources: [node.id],
+        targets: [parentId]
+      });
+    }
 
-  const graph: ElkNode = {
+    node.children.forEach(child => traverse(child, node.id));
+  }
+
+  traverse(root);
+
+  // 2. Run Layout
+  const layoutResult: any = await elk.layout({
     id: 'root',
     layoutOptions: {
       'elk.algorithm': 'layered',
-      'elk.direction': 'DOWN', // Top-to-Bottom flow
-      'elk.spacing.nodeNode': '50', // Vertical spacing
-      'elk.layered.spacing.nodeNodeBetweenLayers': '50',
-      'elk.edgeRouting': 'SPLINES', // Smooth curves
+      'elk.direction': 'RIGHT',
+      'elk.spacing.nodeNode': '60',
+      'elk.layered.spacing.nodeNodeBetweenLayers': '80',
+      'elk.edgeRouting': 'ORTHOGONAL'
     },
     children: elkNodes,
     edges: elkEdges
-  };
-
-  // 2. Run ELK Layout
-  // Note: ELK runs async (WebWorker or Promise)
-  const laidOutGraph = await elk.layout(graph);
-
-  // 3. Convert back to our LayoutGraph type
-  const nodes: GraphNode[] = (laidOutGraph.children || []).map(n => {
-    // Find original node for metadata
-    const original = dag.nodes.find(dn => dn.id === n.id);
-    return {
-      id: n.id,
-      type: original?.type || 'UNKNOWN',
-      label: original?.label || n.id,
-      x: n.x || 0,
-      y: n.y || 0,
-      width: n.width || NODE_WIDTH,
-      height: n.height || NODE_HEIGHT,
-      data: original?.metadata || {}
-    };
   });
 
-  const edges: GraphEdge[] = (laidOutGraph.edges || []).map(e => {
-    // ELK edges have sections
-    return {
-      id: e.id,
-      source: e.sources[0],
-      target: e.targets[0],
-      label: e.labels?.[0]?.text,
-      sections: e.sections?.map(s => ({
-        startPoint: s.startPoint,
-        endPoint: s.endPoint,
-        bendPoints: s.bendPoints
-      })) || []
-    };
+  // 3. Build node map for lookup
+  const nodeMap = new Map<string, LogicalNode>();
+  function mapNodes(n: LogicalNode) {
+      nodeMap.set(n.id, n);
+      n.children.forEach(mapNodes);
+  }
+  mapNodes(root);
+
+  // 4. Convert to output format
+  const outputNodes: GraphNode[] = [];
+  const outputEdges: GraphEdge[] = [];
+
+  (layoutResult.children || []).forEach((ln: any) => {
+    const original = nodeMap.get(ln.id);
+    if (original) {
+        outputNodes.push({
+            ...original,
+            x: ln.x || 0,
+            y: ln.y || 0,
+            width: ln.width || 220,
+            height: ln.height || 80
+        });
+    }
+  });
+
+  (layoutResult.edges || []).forEach((e: any) => {
+      outputEdges.push({
+          id: e.id,
+          source: e.sources?.[0] || '',
+          target: e.targets?.[0] || '',
+          sections: e.sections || []
+      });
   });
 
   return {
-    nodes,
-    edges,
-    width: laidOutGraph.width || 0,
-    height: laidOutGraph.height || 0
+    nodes: outputNodes,
+    edges: outputEdges,
+    width: layoutResult.width || 800,
+    height: layoutResult.height || 600
   };
 }
