@@ -15,6 +15,7 @@ interface DiagramState {
   setSql: (sql: string) => void;
   analyze: () => Promise<void>;
   reset: () => void;
+  save: (name: string) => Promise<void>;
 }
 
 export const useDiagramStore = create<DiagramState>((set, get) => ({
@@ -48,6 +49,26 @@ export const useDiagramStore = create<DiagramState>((set, get) => ({
         layout: null
       });
     }
+  },
+
+  save: async (name: string) => {
+      const { sql, layout } = get();
+      if (!layout) return; // Nothing to save
+
+      try {
+          const res = await fetch('/api/diagrams', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ name, sql, layout })
+          });
+          
+          if (!res.ok) throw new Error("Failed to save");
+          
+          // Optionally show success toast here or update local list
+      } catch (err: any) {
+          console.error("Save Failed", err);
+          // set error?
+      }
   },
 
   reset: () => set({ 
