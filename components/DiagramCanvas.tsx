@@ -1,31 +1,94 @@
 "use client";
 
-import React from 'react';
+import React, { useCallback, useMemo, useState } from 'react';
+import ReactFlow, {
+  Node,
+  Edge,
+  Controls,
+  Background,
+  MiniMap,
+  useNodesState,
+  useEdgesState,
+  ConnectionMode,
+  MarkerType
+} from 'reactflow';
+import 'reactflow/dist/style.css';
+
 import { useDiagramStore } from '@/store/diagram.store';
 import { RelationNode, OperatorNode } from '@/lib/sql/types';
-import { LayoutNode } from '@/lib/graph/types';
+import RelationNodeComponent from './nodes/RelationNode';
+import OperatorNodeComponent from './nodes/OperatorNode';
 
-// Operator icons
-const OP_ICONS: Record<string, string> = {
-  'Scan': '📥',
-  'Filter': '🔻',
-  'Project': '📤',
-  'Join': '🔗',
-  'Aggregate': '∑',
-  'Sort': '↕️',
-  'Limit': '✂️',
-  'Insert': '➕',
-  'Update': '✏️',
-  'Delete': '🗑️'
+// Register custom node types
+const nodeTypes = {
+  relation: RelationNodeComponent,
+  operator: OperatorNodeComponent
 };
 
 export function DiagramCanvas() {
   const { layout, isAnalyzing, error } = useDiagramStore();
+  const [selectedNode, setSelectedNode] = useState<string | null>(null);
+
+  // Convert our layout to React Flow format
+  const { initialNodes, initialEdges } = useMemo(() => {
+    if (!layout || !layout.nodes.length) {
+      return { initialNodes: [], initialEdges: [] };
+    }
+
+    const nodes: Node[] = layout.nodes.map(node => ({
+      id: node.id,
+      type: node.nodeType === 'Relation' ? 'relation' : 'operator',
+      position: { x: node.x, y: node.y },
+      data: node,
+      draggable: true
+    }));
+
+    const edges: Edge[] = layout.edges.map(edge => ({
+      id: edge.id,
+      source: edge.from,
+      target: edge.to,
+      type: 'smoothstep',
+      animated: selectedNode ? (edge.from === selectedNode || edge.to === selectedNode) : false,
+      style: {
+        stroke: selectedNode && (edge.from === selectedNode || edge.to === selectedNode) 
+          ? '#3b82f6' 
+          : '#6b7280',
+        strokeWidth: selectedNode && (edge.from === selectedNode || edge.to === selectedNode) 
+          ? 3 
+          : 2
+      },
+      markerEnd: {
+        type: MarkerType.ArrowClosed,
+        color: selectedNode && (edge.from === selectedNode || edge.to === selectedNode) 
+          ? '#3b82f6' 
+          : '#6b7280'
+      }
+    }));
+
+    return { initialNodes: nodes, initialEdges: edges };
+  }, [layout, selectedNode]);
+
+  const [nodes, setNodes, onNodesChange] = useNodesState(initialNodes);
+  const [edges, setEdges, onEdgesChange] = useEdgesState(initialEdges);
+
+  // Update nodes/edges when layout changes
+  React.useEffect(() => {
+    setNodes(initialNodes);
+    setEdges(initialEdges);
+  }, [initialNodes, initialEdges, setNodes, setEdges]);
+
+  const onNodeClick = useCallback((event: React.MouseEvent, node: Node) => {
+    setSelectedNode(prev => prev === node.id ? null : node.id);
+  }, []);
+
+  const onPaneClick = useCallback(() => {
+    setSelectedNode(null);
+  }, []);
 
   if (isAnalyzing) {
     return (
       <div className="h-full w-full bg-zinc-950 flex items-center justify-center">
-        <div className="text-zinc-400 animate-pulse">Building Logical Plan...</div>
+        <div className="text-zinc-400 animate-pulse text-lg">Building Logical Plan...</div>
       </div>
     );
   }
@@ -33,9 +96,10 @@ export function DiagramCanvas() {
   if (error) {
     return (
       <div className="h-full w-full bg-zinc-950 flex items-center justify-center">
-        <div className="text-red-400 text-center p-4 max-w-md">
-          <div className="text-lg mb-2">⚠️ Error</div>
-          <div className="text-sm font-mono bg-zinc-900 p-3 rounded">{error}</div>
+        <div className="text-red-400 text-center p-6 max-w-md">
+          <div className="text-2xl mb-3">⚠️</div>
+          <div className="text-lg font-medium mb-2">Analysis Error</div>
+          <div className="text-sm font-mono bg-zinc-900 p-4 rounded-lg border border-zinc-800">{error}</div>
         </div>
       </div>
     );
@@ -45,156 +109,49 @@ export function DiagramCanvas() {
     return (
       <div className="h-full w-full bg-zinc-950 flex items-center justify-center">
         <div className="text-zinc-500 text-center">
-          <div className="text-4xl mb-4">🔬</div>
-          <div className="font-medium">No Diagram</div>
-          <div className="text-sm text-zinc-600 mt-1">Click "Run Analysis" to visualize data flow</div>
+          <div className="text-5xl mb-4">🔬</div>
+          <div className="text-lg font-medium mb-1">No Diagram</div>
+          <div className="text-sm text-zinc-600">Click "Run Analysis" to visualize data flow</div>
         </div>
       </div>
     );
   }
 
-  // Calculate viewBox
-  const pad = 40;
-  const minX = Math.min(...layout.nodes.map(n => n.x)) - pad;
-  const minY = Math.min(...layout.nodes.map(n => n.y)) - pad;
-  const maxX = Math.max(...layout.nodes.map(n => n.x + n.width)) + pad;
-  const maxY = Math.max(...layout.nodes.map(n => n.y + n.height)) + pad;
-
   return (
-    <div className="h-full w-full bg-zinc-950 overflow-auto">
-      <svg
-        width="100%"
-        height="100%"
-        viewBox={`${minX} ${minY} ${maxX - minX} ${maxY - minY}`}
-        preserveAspectRatio="xMidYMid meet"
-        className="min-h-full"
+    <div className="h-full w-full bg-zinc-950">
+      <ReactFlow
+        nodes={nodes}
+        edges={edges}
+        onNodesChange={onNodesChange}
+        onEdgesChange={onEdgesChange}
+        onNodeClick={onNodeClick}
+        onPaneClick={onPaneClick}
+        nodeTypes={nodeTypes}
+        connectionMode={ConnectionMode.Loose}
+        fitView
+        fitViewOptions={{ padding: 0.2 }}
+        minZoom={0.1}
+        maxZoom={2}
+        defaultViewport={{ x: 0, y: 0, zoom: 1 }}
+        proOptions={{ hideAttribution: true }}
       >
-        <defs>
-          <marker id="arrow" markerWidth="8" markerHeight="6" refX="7" refY="3" orient="auto">
-            <polygon points="0 0, 8 3, 0 6" fill="#6b7280" />
-          </marker>
-        </defs>
-
-        {/* Edges */}
-        {layout.edges.map(edge => {
-          if (!edge.sections?.length) return null;
-          const s = edge.sections[0];
-          let d = `M ${s.startPoint.x} ${s.startPoint.y}`;
-          if (s.bendPoints) {
-            s.bendPoints.forEach(bp => { d += ` L ${bp.x} ${bp.y}`; });
-          }
-          d += ` L ${s.endPoint.x} ${s.endPoint.y}`;
-          return <path key={edge.id} d={d} fill="none" stroke="#4b5563" strokeWidth="2" markerEnd="url(#arrow)" />;
-        })}
-
-        {/* Nodes */}
-        {layout.nodes.map(node => {
-          if (node.nodeType === 'Relation') {
-            return <RelationBox key={node.id} node={node as LayoutNode & RelationNode} />;
-          } else {
-            return <OperatorBox key={node.id} node={node as LayoutNode & OperatorNode} />;
-          }
-        })}
-      </svg>
+        <Background color="#374151" gap={20} size={1} />
+        <Controls 
+          className="!bg-zinc-800 !border-zinc-700 !rounded-lg"
+          showInteractive={false}
+        />
+        <MiniMap 
+          nodeColor={(node) => {
+            if (node.type === 'operator') return '#6b7280';
+            const data = node.data as RelationNode;
+            if (data.isBase) return '#22c55e';
+            if (data.isFinal) return '#ef4444';
+            return '#6b7280';
+          }}
+          className="!bg-zinc-900 !border-zinc-700 !rounded-lg"
+          maskColor="rgba(0,0,0,0.8)"
+        />
+      </ReactFlow>
     </div>
-  );
-}
-
-// ==================== RELATION BOX (BIG) ====================
-function RelationBox({ node }: { node: LayoutNode & RelationNode }) {
-  // Color based on type
-  let borderColor = '#6b7280'; // gray for intermediate
-  let bgColor = '#1f2937';
-  
-  if (node.isBase) {
-    borderColor = '#22c55e'; // green for base tables
-    bgColor = '#14532d';
-  }
-  if (node.isFinal) {
-    borderColor = '#ef4444'; // red for final result
-    bgColor = '#450a0a';
-  }
-
-  const cols = node.columns.slice(0, 5); // Max 5 columns displayed
-  const hasMore = node.columns.length > 5;
-
-  return (
-    <g>
-      {/* Main box */}
-      <rect
-        x={node.x}
-        y={node.y}
-        width={node.width}
-        height={node.height}
-        rx="6"
-        fill={bgColor}
-        stroke={borderColor}
-        strokeWidth="2"
-      />
-      
-      {/* Header */}
-      <rect
-        x={node.x}
-        y={node.y}
-        width={node.width}
-        height={24}
-        rx="6"
-        fill={borderColor}
-        opacity="0.3"
-      />
-      <text x={node.x + 10} y={node.y + 17} fill="#fff" fontSize="12" fontWeight="600">
-        {node.name}
-      </text>
-      
-      {/* Columns */}
-      {cols.map((col, i) => (
-        <text
-          key={i}
-          x={node.x + 10}
-          y={node.y + 40 + i * 16}
-          fill="#9ca3af"
-          fontSize="10"
-          fontFamily="monospace"
-        >
-          {col.name} {col.dataType ? `(${col.dataType})` : ''}
-        </text>
-      ))}
-      
-      {hasMore && (
-        <text x={node.x + 10} y={node.y + 40 + cols.length * 16} fill="#6b7280" fontSize="10">
-          ... +{node.columns.length - 5} more
-        </text>
-      )}
-    </g>
-  );
-}
-
-// ==================== OPERATOR BOX (SMALL) ====================
-function OperatorBox({ node }: { node: LayoutNode & OperatorNode }) {
-  const icon = OP_ICONS[node.operator] || '⚙️';
-  
-  return (
-    <g>
-      <rect
-        x={node.x}
-        y={node.y}
-        width={node.width}
-        height={node.height}
-        rx="18"
-        fill="#374151"
-        stroke="#6b7280"
-        strokeWidth="1"
-      />
-      <text
-        x={node.x + node.width / 2}
-        y={node.y + node.height / 2 + 4}
-        fill="#e5e7eb"
-        fontSize="11"
-        fontWeight="500"
-        textAnchor="middle"
-      >
-        {icon} {node.operator}
-      </text>
-    </g>
   );
 }
