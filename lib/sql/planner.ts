@@ -29,9 +29,11 @@ function getTableColumns(tableName: string): ColumnDef[] {
   ];
 }
 
-// Helper to stringify expressions
+// Helper to stringify expressions - improved for better extraction
 function exprToString(expr: any): string {
   if (!expr) return "";
+  if (typeof expr === 'string') return expr;
+
   switch (expr.type) {
     case 'ref': return expr.table ? `${expr.table.name}.${expr.name}` : expr.name;
     case 'string': return `'${expr.value}'`;
@@ -39,9 +41,22 @@ function exprToString(expr: any): string {
     case 'boolean': return expr.value ? 'TRUE' : 'FALSE';
     case 'null': return 'NULL';
     case 'star': return '*';
-    case 'call': return `${expr.function?.name || 'fn'}(${(expr.args || []).map(exprToString).join(', ')})`;
-    case 'binary': return `${exprToString(expr.left)} ${expr.op} ${exprToString(expr.right)}`;
-    default: return typeof expr === 'string' ? expr : 'expr';
+    case 'parameter': return `$${expr.name || expr.index}`;
+    case 'list': return `(${(expr.expressions || []).map(exprToString).join(', ')})`;
+    case 'call': 
+      const fnName = expr.function?.name || 'fn';
+      const args = (expr.args || []).map(exprToString).join(', ');
+      return `${fnName}(${args})`;
+    case 'binary': 
+      return `(${exprToString(expr.left)} ${expr.op} ${exprToString(expr.right)})`;
+    case 'unary':
+      return `${expr.op}${exprToString(expr.operand)}`;
+    case 'cast':
+      return `CAST(${exprToString(expr.operand)} AS ${expr.to.name})`;
+    case 'between':
+      return `(${exprToString(expr.operand)} BETWEEN ${exprToString(expr.low)} AND ${exprToString(expr.high)})`;
+    default: 
+      return expr.name || 'expr';
   }
 }
 
@@ -199,6 +214,7 @@ function buildSelectGraph(stmt: any, nodes: GraphNodeData[], edges: Edge[]): str
   if (finalRel && finalRel.nodeType === 'Relation') {
     finalRel.isFinal = true;
     finalRel.name = 'FINAL';
+    finalRel.explanation = 'The final result set of your query, incorporating all filters, joins, and transformations.';
   }
 
   return currentRelationId!;
@@ -221,7 +237,8 @@ function processFromItem(item: any, nodes: GraphNodeData[], edges: Edge[]): stri
       name: alias || tableName,
       isBase: true,
       isFinal: false,
-      columns: getTableColumns(tableName)
+      columns: getTableColumns(tableName),
+      explanation: `Initial source data from the "${tableName}" table.`
     };
     nodes.push(rel);
     
@@ -263,6 +280,44 @@ function processFromItem(item: any, nodes: GraphNodeData[], edges: Edge[]): stri
 }
 
 /**
+ * Generate a human-friendly explanation for an operator
+ */
+function generateOperatorExplanation(
+  opKind: OperatorKind, 
+  details: string, 
+  inputNames: string[]
+): string {
+  const cleanDetails = details.trim();
+  const sourceText = inputNames.length > 0 
+    ? `from ${inputNames.map(n => `"${n}"`).join(' and ')}` 
+    : '';
+
+  switch (opKind) {
+    case 'Scan':
+      return `Retrieving all initial records from the source table "${cleanDetails}".`;
+    case 'Filter':
+      if (cleanDetails.startsWith('HAVING ')) {
+        return `Evaluating the aggregated groups ${sourceText} and keeping only those that satisfy: ${cleanDetails.replace('HAVING ', '')}.`;
+      }
+      return `Examining each row ${sourceText} and keeping only those where the condition (${cleanDetails}) is true.`;
+    case 'Project':
+      return `Narrowing down the dataset ${sourceText} to specific columns: ${cleanDetails}.`;
+    case 'Join':
+      const [type, cond] = cleanDetails.split(' ON ');
+      return `Combining data ${sourceText} using an ${type || 'INNER'} JOIN predicated on: ${cond || 'the specified condition'}.`;
+    case 'Aggregate':
+      const groups = cleanDetails.replace('GROUP BY ', '');
+      return `Taking all rows ${sourceText} and grouping them together based on "${groups}". For each group, we calculate summary values (like sums or counts).`;
+    case 'Sort':
+      return `Arranging the resulting rows ${sourceText} in order of: ${cleanDetails}.`;
+    case 'Limit':
+      return `Picking just the top ${cleanDetails.replace('LIMIT ', '')} rows ${sourceText} and discarding the rest.`;
+    default:
+      return `Applying a ${opKind} transformation ${sourceText} using the logic: ${cleanDetails}.`;
+  }
+}
+
+/**
  * Add operator + output relation, return new relation id
  */
 function addOperatorAndResult(
@@ -273,12 +328,21 @@ function addOperatorAndResult(
   nodes: GraphNodeData[],
   edges: Edge[]
 ): string {
+  // Get names of input relations for better explanation
+  const inputNames = inputRelIds.map(id => {
+    const rel = nodes.find(n => n.id === id) as RelationNode;
+    return rel?.name || 'Dataset';
+  });
+
+  const explanation = generateOperatorExplanation(opKind, details, inputNames);
+  
   // Create operator node
   const op: OperatorNode = {
     id: genId('op'),
     nodeType: 'Operator',
     operator: opKind,
-    details: details
+    details: details,
+    explanation: explanation
   };
   nodes.push(op);
   
@@ -288,13 +352,18 @@ function addOperatorAndResult(
   }
   
   // Create output relation
+  const resName = genResultName();
+  // More specific relation explanation
+  const relExplanation = `Dataset produced after applying the ${opKind} transformation on ${inputNames.join(' & ')} (${details.length > 30 ? details.substring(0, 27) + '...' : details}).`;
+  
   const result: RelationNode = {
     id: genId('rel'),
     nodeType: 'Relation',
-    name: genResultName(),
+    name: resName,
     isBase: false,
     isFinal: false,
-    columns: outputColumns
+    columns: outputColumns,
+    explanation: relExplanation
   };
   nodes.push(result);
   
@@ -317,7 +386,7 @@ function mergeColumns(left: ColumnDef[], right: ColumnDef[]): ColumnDef[] {
  * Fallback for unparseable SQL
  */
 function buildFallbackGraph(sql: string, nodes: GraphNodeData[], edges: Edge[]) {
-  const upperSql = sql.toUpperCase();
+  const upperSql = sql.replace(/\s+/g, ' ').toUpperCase();
   
   // Extract tables
   const tables: string[] = [];
@@ -336,7 +405,8 @@ function buildFallbackGraph(sql: string, nodes: GraphNodeData[], edges: Edge[]) 
       name: t,
       isBase: true,
       isFinal: false,
-      columns: getTableColumns(t)
+      columns: getTableColumns(t),
+      explanation: `Initial source data from the "${t}" table.`
     };
     nodes.push(rel);
     
@@ -353,32 +423,59 @@ function buildFallbackGraph(sql: string, nodes: GraphNodeData[], edges: Edge[]) 
   }
   
   if (!currentId) {
-    const rel: RelationNode = { id: genId('rel'), nodeType: 'Relation', name: 'SOURCE', isBase: true, isFinal: false, columns: [] };
+    const rel: RelationNode = { id: genId('rel'), nodeType: 'Relation', name: 'SOURCE', isBase: true, isFinal: false, columns: [], explanation: 'Generic data source.' };
     nodes.push(rel);
     currentId = rel.id;
   }
   
+  // Robust regex for clauses
+  function extractClause(keyword: string): string | null {
+    const cleanSql = sql.replace(/\s+/g, ' ');
+    const regex = new RegExp(`\\b${keyword}\\b\\s+(.*?)(?=\\bSELECT\\b|\\bFROM\\b|\\bWHERE\\b|\\bGROUP\\s+BY\\b|\\bHAVING\\b|\\bORDER\\s+BY\\b|\\bLIMIT\b|$)`, 'i');
+    const match = cleanSql.match(regex);
+    return match ? match[1].trim() : null;
+  }
+
+  const whereCond = extractClause('WHERE');
+  const groupBy = extractClause('GROUP BY');
+  const orderBy = extractClause('ORDER BY');
+  const limitMatch = sql.match(/\bLIMIT\b\s+(\d+)/i);
+  const selectCols = extractClause('SELECT');
+
   // Add operators based on keywords
-  if (/\bWHERE\b/i.test(upperSql)) {
-    currentId = addOperatorAndResult('Filter', 'WHERE ...', [currentId], getRelationColumns(currentId, nodes), nodes, edges);
+  if (whereCond) {
+    currentId = addOperatorAndResult('Filter', whereCond, [currentId], getRelationColumns(currentId, nodes), nodes, edges);
+  } else if (/\bWHERE\b/i.test(upperSql)) {
+    currentId = addOperatorAndResult('Filter', 'unspecified filter condition', [currentId], getRelationColumns(currentId, nodes), nodes, edges);
   }
-  if (/\bGROUP\s+BY\b/i.test(upperSql)) {
-    currentId = addOperatorAndResult('Aggregate', 'GROUP BY', [currentId], [{ name: 'agg', dataType: 'UNKNOWN' }], nodes, edges);
+
+  if (groupBy) {
+    currentId = addOperatorAndResult('Aggregate', `GROUP BY ${groupBy}`, [currentId], [{ name: 'results', dataType: 'UNKNOWN' }], nodes, edges);
+  } else if (/\bGROUP\s+BY\b/i.test(upperSql)) {
+    currentId = addOperatorAndResult('Aggregate', 'the requested groupings', [currentId], [{ name: 'results', dataType: 'UNKNOWN' }], nodes, edges);
   }
-  if (/\bSELECT\b/i.test(upperSql) && !/\bGROUP\s+BY\b/i.test(upperSql)) {
-    currentId = addOperatorAndResult('Project', 'SELECT', [currentId], getRelationColumns(currentId, nodes), nodes, edges);
+
+  if (selectCols && !groupBy) {
+    if (selectCols !== '*') {
+      currentId = addOperatorAndResult('Project', selectCols, [currentId], getRelationColumns(currentId, nodes), nodes, edges);
+    }
   }
-  if (/\bORDER\s+BY\b/i.test(upperSql)) {
-    currentId = addOperatorAndResult('Sort', 'ORDER BY', [currentId], getRelationColumns(currentId, nodes), nodes, edges);
+
+  if (orderBy) {
+    currentId = addOperatorAndResult('Sort', orderBy, [currentId], getRelationColumns(currentId, nodes), nodes, edges);
+  } else if (/\bORDER\s+BY\b/i.test(upperSql)) {
+    currentId = addOperatorAndResult('Sort', 'the requested row order', [currentId], getRelationColumns(currentId, nodes), nodes, edges);
   }
-  if (/\bLIMIT\b/i.test(upperSql)) {
-    currentId = addOperatorAndResult('Limit', 'LIMIT', [currentId], getRelationColumns(currentId, nodes), nodes, edges);
+
+  if (limitMatch) {
+    currentId = addOperatorAndResult('Limit', `LIMIT ${limitMatch[1]}`, [currentId], getRelationColumns(currentId, nodes), nodes, edges);
   }
   
   // Mark final
   const finalRel = nodes.find(n => n.id === currentId) as RelationNode;
-  if (finalRel) {
+  if (finalRel && finalRel.nodeType === 'Relation') {
     finalRel.isFinal = true;
     finalRel.name = 'FINAL';
+    finalRel.explanation = 'The final result set of your query.';
   }
 }

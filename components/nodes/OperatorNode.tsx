@@ -52,12 +52,21 @@ function OperatorNodeComponent({ data, selected }: OperatorNodeProps) {
       <Handle type="source" position={Position.Bottom} className="!bg-zinc-500" />
 
       {/* Tooltip with details */}
-      {showTooltip && data.details && (
-        <div className="absolute left-full top-0 ml-3 z-50 bg-zinc-900 border border-zinc-700 rounded-lg p-3 min-w-[180px] max-w-[300px] shadow-xl">
-          <div className="text-xs text-zinc-500 mb-1">Operator</div>
-          <div className="text-sm font-semibold text-white mb-2">{data.operator}</div>
-          <div className="text-xs text-zinc-400 font-mono break-all">
-            {data.details}
+      {showTooltip && (
+        <div className="absolute left-full top-0 ml-3 z-50 bg-zinc-900 border border-zinc-700 rounded-lg p-3 min-w-[220px] max-w-[350px] shadow-2xl ring-1 ring-white/10">
+          <div className="text-xs text-blue-400 font-bold tracking-wider uppercase mb-1">Operator: {data.operator}</div>
+          
+          {data.explanation && (
+            <div className="text-sm text-white font-medium mb-3 leading-relaxed">
+              {data.explanation}
+            </div>
+          )}
+          
+          <div className="pt-2 border-t border-zinc-800">
+            <div className="text-[10px] text-zinc-500 uppercase font-bold mb-1">Technical Logic</div>
+            <div className="text-xs text-zinc-400 font-mono bg-zinc-950 p-2 rounded border border-white/5 break-all max-h-32 overflow-auto">
+              {data.details}
+            </div>
           </div>
         </div>
       )}

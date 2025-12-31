@@ -77,10 +77,18 @@ function RelationNodeComponent({ data, selected }: RelationNodeProps) {
 
       {/* Tooltip */}
       {showTooltip && (
-        <div className="absolute left-full top-0 ml-3 z-50 bg-zinc-900 border border-zinc-700 rounded-lg p-3 min-w-[200px] shadow-xl">
-          <div className="text-xs text-zinc-500 mb-1">{label}</div>
+        <div className="absolute left-full top-0 ml-3 z-50 bg-zinc-900 border border-zinc-700 rounded-lg p-3 min-w-[220px] max-w-[350px] shadow-2xl ring-1 ring-white/10">
+          <div className="text-xs text-zinc-500 font-bold tracking-wider uppercase mb-1">{label}</div>
           <div className="text-sm font-semibold text-white mb-2">{data.name}</div>
-          <div className="text-xs text-zinc-400 font-mono space-y-1">
+          
+          {data.explanation && (
+            <div className="text-xs text-zinc-300 font-medium mb-3 leading-relaxed italic border-l-2 border-zinc-700 pl-2">
+              {data.explanation}
+            </div>
+          )}
+
+          <div className="text-[10px] text-zinc-500 uppercase font-bold mb-1">Schema</div>
+          <div className="text-xs text-zinc-400 font-mono space-y-1 bg-zinc-950 p-2 rounded border border-white/5">
             {data.columns.map((col, i) => (
               <div key={i} className="flex justify-between gap-4">
                 <span>{col.name}</span>

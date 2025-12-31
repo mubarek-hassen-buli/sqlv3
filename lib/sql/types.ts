@@ -36,6 +36,7 @@ export interface RelationNode {
   isBase: boolean;        // true = source table, false = intermediate/result
   isFinal: boolean;       // true = final query result
   columns: ColumnDef[];
+  explanation?: string;   // Human-friendly description of what this relation represents
 }
 
 // Operator Node (SMALL - transformer)
@@ -44,6 +45,7 @@ export interface OperatorNode {
   nodeType: "Operator";
   operator: OperatorKind;
   details: string;        // conditions, expressions, join keys
+  explanation?: string;   // Human-friendly description of what this operator does
 }
 
 // Union type for graph nodes
