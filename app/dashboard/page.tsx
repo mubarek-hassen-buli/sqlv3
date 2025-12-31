@@ -86,6 +86,7 @@ export default function DashboardPage() {
         <nav className="flex gap-6 text-sm font-medium text-zinc-400">
            <Link href="/dashboard" className="text-white">Dashboard</Link>
            <Link href="/visualize" className="hover:text-white transition-colors">Workspace</Link>
+           <Link href="/docs" className="hover:text-white transition-colors text-zinc-500">Docs</Link>
         </nav>
         <div className="ml-auto flex items-center gap-4">
              {session?.user?.image && (

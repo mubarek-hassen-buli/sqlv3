@@ -78,9 +78,12 @@ export default function VisualizePage() {
         <Link href="/" className="font-bold text-lg bg-gradient-to-r from-blue-400 to-purple-400 bg-clip-text text-transparent mr-6">
           SQL Visualizer
         </Link>
-        <nav className="flex gap-4 text-sm font-medium text-zinc-400 border-l border-zinc-800 pl-6 h-full items-center">
+        <nav className="flex gap-5 text-sm font-medium text-zinc-400 border-l border-zinc-800 ml-6 pl-6 h-full items-center">
             <Link href="/dashboard" className="hover:text-white transition-colors">
               Dashboard
+            </Link>
+            <Link href="/docs" className="hover:text-white transition-colors text-zinc-500">
+              Docs
             </Link>
         </nav>
         <div className="ml-auto flex items-center gap-4">
