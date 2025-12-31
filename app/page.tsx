@@ -16,10 +16,6 @@ export default function LandingPage() {
           <div className="font-bold text-xl tracking-tight bg-gradient-to-r from-blue-400 to-purple-400 bg-clip-text text-transparent">
             SQL Visualizer
           </div>
-          <nav className="ml-auto flex gap-6 text-sm font-medium text-zinc-400">
-            <Link href="https://github.com/mubarek-hassen-buli/sqlv3" className="hover:text-white transition-colors">GitHub</Link>
-            <Link href="/visualize" className="hover:text-white transition-colors">Docs</Link>
-          </nav>
           <div className="ml-6">
              <Link 
                 href="/visualize"
