@@ -16,6 +16,9 @@ export default function LandingPage() {
           <div className="font-bold text-xl tracking-tight bg-gradient-to-r from-blue-400 to-purple-400 bg-clip-text text-transparent">
             SQL Visualizer
           </div>
+          <nav className="ml-auto flex gap-6 text-sm font-medium text-zinc-400">
+            <Link href="/docs" className="hover:text-white transition-colors">Docs</Link>
+          </nav>
           <div className="ml-6">
              <Link 
                 href="/visualize"
@@ -48,16 +51,10 @@ export default function LandingPage() {
             <div className="flex flex-col sm:flex-row gap-4 w-full justify-center max-w-sm sm:max-w-none">
                 <Link 
                     href="/visualize"
-                    className="group flex items-center justify-center gap-2 px-8 py-3.5 bg-blue-600 hover:bg-blue-500 rounded-xl font-semibold text-white transition-all hover:scale-105 active:scale-95"
+                    className="group flex items-center justify-center gap-2 px-8 py-4 bg-blue-600 hover:bg-blue-500 rounded-xl font-bold text-lg text-white transition-all hover:scale-105 active:scale-95 shadow-lg shadow-blue-500/25"
                 >
-                    Try Visualizer
-                    <ArrowRight className="w-4 h-4 group-hover:translate-x-1 transition-transform" />
-                </Link>
-                <Link 
-                    href="https://github.com/mubarek-hassen-buli/sqlv3"
-                    className="flex items-center justify-center gap-2 px-8 py-3.5 bg-zinc-900 hover:bg-zinc-800 border border-zinc-800 rounded-xl font-medium text-zinc-300 transition-colors"
-                >
-                    View Source
+                    Get Started for Free
+                    <ArrowRight className="w-5 h-5 group-hover:translate-x-1 transition-transform" />
                 </Link>
             </div>
 
